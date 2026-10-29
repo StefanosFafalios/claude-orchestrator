@@ -1,0 +1,192 @@
+# claude-orchestrator
+
+A Claude Code plugin (`cost-aware-orchestrator`) that makes Claude Code spend tokens
+and quota deliberately:
+
+- **Cost-aware routing**: each task is classified as trivial, standard, complex or
+  critical by a deterministic keyword classifier (no LLM call), then routed to the
+  cheapest sufficient Claude model and effort.
+- **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
+  `architect` (opus/high), `verifier` (sonnet/medium), and `codex-reviewer`.
+- **Optional Codex integration** through your locally installed Codex CLI.
+- **Bidirectional quota fallback**: when Claude is near or at its limit, the remaining
+  work goes to Codex, and vice versa. Review stays on the healthier engine.
+- **Resumable handoffs**: the replacement engine gets a handoff listing completed work
+  under `## Do not redo`, never the original broad prompt.
+- **Automatic activation**: on every prompt, a hook classifies the request locally
+  (no network, a few milliseconds) and injects the policy plus a concrete plan for that
+  prompt: which agents, models and engines to use. A broadly scoped skill backs it up.
+  You don't need a slash command. Subagent reports are not re-classified.
+
+No API keys, OAuth tokens or secrets are stored. Network access only happens through
+your local `claude` and `codex` CLIs.
+
+## Requirements
+
+- Claude Code with plugin support. `/smart-task` uses the Workflow tool when your
+  account has it; otherwise it runs the same steps inline with regular subagents.
+- `python3` (3.11+ recommended; the scripts also run on 3.8+), `bash`, `git`
+- Optional: the [Codex CLI](https://github.com/openai/codex), logged in (`codex login`)
+
+## Installation
+
+```text
+/plugin marketplace add StefanosFafalios/claude-orchestrator
+/plugin install cost-aware-orchestrator@claude-orchestrator
+```
+
+For local development: `claude --plugin-dir /path/to/claude-orchestrator`.
+
+## Per-project setup
+
+On the first nontrivial task in a project without config, Claude asks:
+"Create .claude/orchestrator.config.json with default orchestration settings?" Say yes
+to copy `templates/orchestrator.config.json`, then fill in your commands:
+
+```json
+{
+  "commands": { "test": "pytest -q", "lint": "ruff check .", "typecheck": "mypy src" }
+}
+```
+
+Project config overrides only the fields it contains. Everything else comes from the
+plugin defaults. Unknown fields are ignored. Invalid JSON stops orchestration with a
+clear error.
+
+Add the runtime state to the project's `.gitignore`:
+
+```gitignore
+.claude/engine-state.json
+.claude/orchestrator/
+```
+
+## Example commands
+
+```text
+/cost-aware-orchestrator:smart-task Implement retry handling for webhook failures and update tests
+/cost-aware-orchestrator:engine-status
+/cost-aware-orchestrator:reset-engine-state
+```
+
+Without a command, the policy still applies:
+
+| Prompt | Behavior |
+|---|---|
+| "Fix this typo" | Claude haiku/low, no fan-out |
+| "Add tests for this module" | sonnet/medium with a focused implementer |
+| "Debug this intermittent failure" | scout, then sonnet/high (opus/high if needed) |
+| "Refactor authentication and add tests" | critical: architect plan, healthy engine implements, other engine reviews |
+| "What does this function do?" | answered directly; no workflow |
+
+## Routing policy
+
+| Route | Examples | Implementation | Review (both healthy) |
+|---|---|---|---|
+| trivial | typo, rename, lookup | haiku / low | haiku / low |
+| standard | feature, tests, docs | sonnet / medium | sonnet / medium |
+| complex | debugging, multi-file, architecture | sonnet / high, escalate to opus | sonnet / medium, or Codex if flagged |
+| critical | production, security, migrations, auth/payment | opus / high | Codex (independent) |
+
+When Claude is constrained (near limit or limited), work goes to Codex. When Codex is
+constrained, work goes to Claude. When both are constrained, the engine with more
+remaining quota does one atomic task and a human reviews. Full table:
+[`skills/cost-aware-orchestration/references/routing-policy.md`](skills/cost-aware-orchestration/references/routing-policy.md).
+
+## Fallback behavior
+
+1. `scripts/claude_with_fallback.sh` and `scripts/codex_with_fallback.sh` exit **42**
+   only on usage-limit messages (`usage limit`, `hit your session/weekly limit`,
+   `limit reached`, and `resets`/`upgrade` when no auth or network error is present).
+   Authentication, permission, network and ordinary errors exit 1 and are never handed off.
+2. On 42, the engine is marked `limited` in `.claude/engine-state.json`. A handoff is
+   written to `.claude/orchestrator/handoffs/<task-id>.md` (objective, completed and
+   remaining work, diff, failing tests, project commands, constraints, output contract).
+   Only the remaining work goes to the other engine.
+   `claude_with_fallback.sh` runs Claude with `--permission-mode acceptEdits` by default
+   (edits allowed, shell commands such as tests need approval). Set
+   `CLAUDE_PERMISSION_MODE` to change it.
+3. Each engine is tried at most once per task. If both hit limits, orchestration stops
+   and asks you.
+4. To resume an interrupted run, relaunch the workflow with `resumeFromRunId`, or pass
+   the saved handoff (`handoff: ".claude/orchestrator/handoffs/<id>.md"`).
+
+The Claude session can't detect its own quota before it runs out. Record what `/usage`
+shows so routing can switch early:
+
+```bash
+python3 "$PLUGIN/scripts/engine_state.py" set --engine claude --remaining-pct 20   # → near_limit
+```
+
+**Codex → Claude**: to let a Codex session hand off to Claude, add this to the project's
+`AGENTS.md`:
+
+```markdown
+If Codex reports a usage limit mid-task, write a handoff with
+`python3 <plugin>/scripts/write_handoff.py --target-engine claude ...` and run
+`bash <plugin>/scripts/claude_with_fallback.sh <handoff>`. Exit 42 means Claude is limited too: stop.
+```
+
+## Security rules
+
+- No credentials, tokens or user-specific config in the repository or in state.
+- Error messages, diffs and test output are scrubbed of credential-shaped strings
+  before they are persisted or handed off.
+- Delegated Codex runs default to `--sandbox read-only`. Only implementation uses
+  `workspace-write`.
+- Hooks read local files only and never call `claude`, `codex` or the network.
+- The dispatch guard only *denies*. It never auto-approves, so your permission rules
+  still apply.
+- All engines follow
+  [`references/coding-standards.md`](skills/cost-aware-orchestration/references/coding-standards.md):
+  smallest diff, no commits unless asked, and no agent attribution
+  (`Co-Authored-By`, "Generated with") in commits or PRs.
+
+## Updating thresholds
+
+```json
+{ "thresholds": { "near_limit_pct": 30 } }
+```
+
+An engine whose `remaining_pct` is below `near_limit_pct` is treated as `near_limit`.
+Models and efforts are overridable the same way under `defaults`, e.g.
+`{"defaults": {"implementation_model": "opus"}}`.
+
+## Disabling Codex
+
+```json
+{ "engines": { "codex": false } }
+```
+
+All routing then stays on Claude. To keep Codex for review only, set
+`"fallback": {"claude_to_codex": false}`. To turn off automatic orchestration (the hook
+then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
+
+```json
+{ "engines": { "claude": false, "codex": false }, "automatic": false }
+```
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `error: invalid JSON in .../orchestrator.config.json` | Fix the reported line and column. Orchestration stays stopped until the file parses |
+| Stuck on Codex after the Claude quota reset | `/cost-aware-orchestrator:reset-engine-state`, or `engine_state.py set --engine claude --remaining-pct 100` |
+| Dispatch denied by `[cost-aware-orchestrator]` | Follow the reason, or add a `Justification:` line for a standard task that needs the architect |
+| Codex wrapper exits 1 with "not logged in" | Run `codex login`. This is not a quota failure, so there is no fallback |
+| Hook seems silent | Check `claude --debug`. The hook prints JSON with `hookSpecificOutput.additionalContext` |
+
+## Running tests
+
+```bash
+python3 -m pytest -q        # offline; workflow scenarios need node
+ruff check .
+shellcheck scripts/*.sh     # if installed
+```
+
+The tests never invoke the real `claude` or `codex`. The wrappers are exercised with
+fake CLIs, and `workflows/smart-task.js` runs under `tests/workflow_harness.mjs` with
+mocked agents.
+
+## License
+
+MIT

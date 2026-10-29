@@ -1,0 +1,29 @@
+{
+  "description": "Injects the compact orchestration policy on every prompt and blocks subagent dispatches that violate the routing policy.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject_orchestration_context.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_agent_dispatch.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-orchestrator",
+  "description": "Cost- and quota-aware Claude Code orchestration with optional Codex fallback.",
+  "owner": {
+    "name": "Stefanos Fafalios"
+  },
+  "plugins": [
+    {
+      "name": "cost-aware-orchestrator",
+      "description": "Tiered Claude routing, Claude/Codex quota fallback with resumable handoffs, and cross-engine review.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

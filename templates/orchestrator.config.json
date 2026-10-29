@@ -1,0 +1,47 @@
+{
+  "defaults": {
+    "scout_model": "haiku",
+    "scout_effort": "low",
+    "implementation_model": "sonnet",
+    "implementation_effort": "medium",
+    "architect_model": "opus",
+    "architect_effort": "high",
+    "review_model": "sonnet",
+    "review_effort": "medium",
+    "critical_review_model": "opus",
+    "critical_review_effort": "high"
+  },
+  "thresholds": {
+    "near_limit_pct": 25,
+    "critical_limit_pct": 10
+  },
+  "commands": {
+    "test": "",
+    "lint": "",
+    "typecheck": ""
+  },
+  "paths": {
+    "include": [],
+    "exclude": [
+      ".git",
+      "node_modules",
+      "__pycache__",
+      "dist",
+      "build",
+      ".venv"
+    ]
+  },
+  "engines": {
+    "claude": true,
+    "codex": true
+  },
+  "fallback": {
+    "claude_to_codex": true,
+    "codex_to_claude": true,
+    "require_human_review_when_both_limited": true
+  },
+  "codex": {
+    "default_model": "gpt-6.1-sol",
+    "max_files_per_fallback": 5
+  }
+}
