@@ -31,6 +31,9 @@ project's `.claude/orchestrator.config.json`.
 
 `scripts/engine_state.py` owns config loading, state I/O and secret redaction; the
 other scripts and hooks import from it rather than re-implementing them.
+`scripts/usage_sources.py` reads observed quota from local files only (Claude status line
+input, Codex session logs); `engine_state.sync_usage` applies it. Tests must isolate both
+sources (the autouse `usage_files` fixture) and never read the real `~/.claude` or `~/.codex`.
 
 ## Platform constraints
 

@@ -18,6 +18,9 @@ and quota deliberately:
   prompt: which agents, models and engines to use. A broadly scoped skill backs it up.
   You don't need a slash command. Subagent reports are not re-classified.
 
+- **Usage tracking**: reads remaining Claude and Codex quota from local files (status
+  line input, Codex session logs) and routes before an engine runs out.
+
 No API keys, OAuth tokens or secrets are stored. Network access only happens through
 your local `claude` and `codex` CLIs.
 
@@ -36,6 +39,38 @@ your local `claude` and `codex` CLIs.
 ```
 
 For local development: `claude --plugin-dir /path/to/claude-orchestrator`.
+
+## Setup
+
+Run once per project:
+
+```text
+/cost-aware-orchestrator:setup
+```
+
+It checks Python and the Codex CLI, turns on usage tracking, creates the project config
+(detecting your test, lint and typecheck commands) and offers the `.gitignore` entries.
+It asks before every change.
+
+**Codex** is optional. If the `codex` CLI is installed and logged in (`codex login`), the
+plugin uses it with no further configuration. Without it, set
+`"engines": {"codex": false}` and everything stays on Claude.
+
+## Usage tracking
+
+Routing uses real quota numbers when they are available locally (no network):
+
+| Engine | Source |
+|---|---|
+| Codex | the newest session log in `~/.codex/sessions/` (`rate_limits`: 5-hour and weekly windows) |
+| Claude | `~/.claude/statusline-input.json`, saved by your status line (`rate_limits.five_hour` / `seven_day`) |
+
+The prompt hook, `route_engine.py` and `engine_state.py status` sync these on every
+call. The tightest active window sets `remaining_pct`. A window past its reset time
+counts as unused, so a `limited` engine recovers on its own. A newer manual
+`engine_state.py set` or `mark-limit` wins over an older observation. For Claude,
+`/cost-aware-orchestrator:setup` adds one save step in front of your existing status line
+command. Turn syncing off with `"usage_sync": false`.
 
 ## Per-project setup
 
@@ -63,6 +98,7 @@ Add the runtime state to the project's `.gitignore`:
 ## Example commands
 
 ```text
+/cost-aware-orchestrator:setup
 /cost-aware-orchestrator:smart-task Implement retry handling for webhook failures and update tests
 /cost-aware-orchestrator:engine-status
 /cost-aware-orchestrator:reset-engine-state
@@ -110,8 +146,8 @@ remaining quota does one atomic task and a human reviews. Full table:
 4. To resume an interrupted run, relaunch the workflow with `resumeFromRunId`, or pass
    the saved handoff (`handoff: ".claude/orchestrator/handoffs/<id>.md"`).
 
-The Claude session can't detect its own quota before it runs out. Record what `/usage`
-shows so routing can switch early:
+Usage tracking (above) switches engines before quota runs out. Without it, record what
+`/usage` shows yourself:
 
 ```bash
 python3 "$PLUGIN/scripts/engine_state.py" set --engine claude --remaining-pct 20   # → near_limit

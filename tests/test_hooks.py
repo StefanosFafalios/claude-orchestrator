@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -11,7 +12,8 @@ def run_hook(name, payload, project):
     out = subprocess.run(
         [sys.executable, str(HOOKS / name)],
         input=json.dumps(payload), capture_output=True, text=True, check=True, timeout=5,
-        env={"CLAUDE_PROJECT_DIR": str(project), "PATH": "/usr/bin:/bin"},
+        env={"CLAUDE_PROJECT_DIR": str(project), "PATH": "/usr/bin:/bin",
+             **{k: os.environ[k] for k in ("ORCHESTRATOR_CLAUDE_USAGE_FILE", "CODEX_HOME")}},
     )
     return json.loads(out.stdout) if out.stdout.strip() else None
 
@@ -127,3 +129,11 @@ def test_hook_is_fast(project):
 def test_subagent_handback_is_ignored(project):
     handback = '<agent-message from="a1">\n[Subagent hand-back] Changed auth credentials handling; no secrets stored.'
     assert run_hook("inject_orchestration_context.py", {"prompt": handback}, project) is None
+
+
+def test_observed_usage_changes_routing(project, usage_files):
+    from test_usage_sync import write_claude
+    write_claude(usage_files, five=85)
+    text = context(project, "add unit tests for parser")
+    assert "claude=near_limit(15%)" in text
+    assert "implement on Codex" in text

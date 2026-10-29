@@ -21,7 +21,7 @@ from engine_state import (  # noqa: E402
     config_path,
     effective_status,
     load_config,
-    load_state,
+    load_synced_state,
 )
 from route_engine import route  # noqa: E402
 
@@ -52,7 +52,7 @@ def build_context(root: Path, prompt: str = "") -> str:
     if config.get("automatic") is False:
         return DISABLED
 
-    state = load_state(root)
+    state = load_synced_state(config, root)
     engines = ", ".join(
         f"{name}={effective_status(state[name], config) if config['engines'].get(name, True) else 'disabled'}"
         f"({state[name].get('remaining_pct', 100):g}%)"
@@ -62,7 +62,8 @@ def build_context(root: Path, prompt: str = "") -> str:
     if not config_path(root).is_file():
         lines.append(
             'No project config: before orchestrating, ask once "Create .claude/orchestrator.config.json '
-            'with default orchestration settings?" and copy the plugin template only if the user agrees.'
+            'with default orchestration settings?" and copy the plugin template only if the user agrees '
+            '(or suggest /cost-aware-orchestrator:setup for the full guided setup).'
         )
     if prompt.strip():
         lines += ["", directive(prompt, config, state)]

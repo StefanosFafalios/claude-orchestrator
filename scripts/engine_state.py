@@ -97,6 +97,7 @@ def load_config(root: Path | None = None) -> dict:
     if path.is_file():
         config = deep_merge(config, _read_json(path))
     config.setdefault("automatic", True)
+    config.setdefault("usage_sync", True)
     return config
 
 
@@ -128,6 +129,65 @@ def save_state(state: dict, root: Path | None = None) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def _epoch(iso: str | None) -> float | None:
+    try:
+        return datetime.fromisoformat(iso).timestamp() if iso else None
+    except ValueError:
+        return None
+
+
+def sync_usage(state: dict, config: dict, observations: dict | None = None) -> bool:
+    """Apply observed usage (see usage_sources.py) to ``state``; return True if it changed.
+
+    An observation applies when it is at least as new as the entry's last check, or when
+    the entry is ``limited`` and every observed window has since reset.
+    """
+    if config.get("usage_sync") is False:
+        return False
+    if observations is None:
+        from usage_sources import observe  # Imported lazily: only syncing reads ~/.claude and ~/.codex.
+        observations = observe()
+    changed = False
+    for engine in ENGINES:
+        obs = observations.get(engine)
+        if not obs:
+            continue
+        entry = state[engine]
+        last = _epoch(entry.get("last_checked"))
+        fresh = last is None or obs["observed_at"] >= last
+        if not (fresh or (entry.get("status") == "limited" and obs["windows_reset"])):
+            continue
+        remaining = obs["remaining_pct"]
+        if remaining <= 0:
+            status = "limited"
+        elif remaining < config["thresholds"]["near_limit_pct"]:
+            status = "near_limit"
+        else:
+            status = "healthy"
+        update = {
+            "status": status,
+            "remaining_pct": remaining,
+            "last_checked": datetime.fromtimestamp(max(obs["observed_at"], last or 0), timezone.utc)
+            .replace(microsecond=0).isoformat(),
+            "usage_source": obs["source"],
+            "resets_at": obs["resets_at"],
+        }
+        if status != "limited":
+            update["last_error"] = None
+        if any(entry.get(key) != value for key, value in update.items()):
+            entry.update(update)
+            changed = True
+    return changed
+
+
+def load_synced_state(config: dict, root: Path | None = None) -> dict:
+    """State with fresh observed usage applied and saved."""
+    state = load_state(root)
+    if sync_usage(state, config):
+        save_state(state, root)
+    return state
 
 
 def effective_status(entry: dict, config: dict) -> str:
@@ -174,7 +234,8 @@ def cmd_record_result(state: dict, args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status", help="print current state as JSON")
+    sub.add_parser("status", help="sync observed usage, then print current state as JSON")
+    sub.add_parser("sync", help="apply observed Claude/Codex usage from local files")
     sub.add_parser("config", help="print the merged configuration as JSON")
     sub.add_parser("reset", help="restore default state")
 
@@ -207,6 +268,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "reset":
         state = {engine: dict(DEFAULT_ENGINE) for engine in ENGINES}
+    elif args.command in ("status", "sync"):
+        print(json.dumps(load_synced_state(config), indent=2))
+        return 0
     else:
         state = load_state()
         if args.command == "set":

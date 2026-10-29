@@ -11,6 +11,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "hooks" / "scripts"))
 
 
+@pytest.fixture(autouse=True)
+def usage_files(tmp_path_factory, monkeypatch):
+    """Never read the real ~/.claude or ~/.codex usage; tests write these paths instead."""
+    base = tmp_path_factory.mktemp("usage")
+    monkeypatch.setenv("ORCHESTRATOR_CLAUDE_USAGE_FILE", str(base / "statusline-input.json"))
+    monkeypatch.setenv("CODEX_HOME", str(base / "codex"))
+    return base
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """Empty project directory used as CLAUDE_PROJECT_DIR."""

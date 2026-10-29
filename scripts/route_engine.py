@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 
-from engine_state import ConfigError, effective_status, load_config, load_state
+from engine_state import ConfigError, effective_status, load_config, load_synced_state
 
 ROLES = ("implementation", "review", "scout", "architecture")
 ROUTES = ("trivial", "standard", "complex", "critical")
@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(route(args.role, args.task_route, config, load_state(), args.requires_codex_review), indent=2))
+    print(json.dumps(route(args.role, args.task_route, config, load_synced_state(config), args.requires_codex_review), indent=2))
     return 0
 
 
