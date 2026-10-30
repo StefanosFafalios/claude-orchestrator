@@ -185,6 +185,7 @@ def test_scout_upgrade_runs_plan_at_new_tier(repo, write_config):
     assert out["result"]["route"] == "complex"
     assert out["result"]["implementation_effort"] == "high"
     assert "plan" in labels(out["calls"])
+    assert "review:codex" in labels(out["calls"])
     assert out["result"]["reroute_events"] == [
         {"source": "scout", "from": "standard", "to": "complex", "reason": "multiple modules"}]
 

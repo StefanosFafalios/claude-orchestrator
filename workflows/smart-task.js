@@ -168,15 +168,16 @@ if (!classification || !ROUTES.includes(classification.route)) {
   classification = parseJson(r.stdout, 'classify_task.py')
 }
 let ROUTE = classification.route
-const CODEX_REVIEW_FLAG = classification.requires_codex_review ? ' --requires-codex-review' : ''
+let requiresCodexReview = Boolean(classification.requires_codex_review)
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
 phase('Route')
 // implEngine 'auto' lets the router derive the implementer, so review lands on the other engine.
 async function routeAll(phaseName, implEngine = 'auto') {
+  const codexReviewFlag = requiresCodexReview ? ' --requires-codex-review' : ''
   const extra = {
     implementation: ` --task-id ${q(TASK_ID)}`,
-    review: ` --task-id ${q(TASK_ID)} --implementation-engine ${implEngine}${CODEX_REVIEW_FLAG}`,
+    review: ` --task-id ${q(TASK_ID)} --implementation-engine ${implEngine}${codexReviewFlag}`,
   }
   const routeCmd = role => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${extra[role] || ''}`
   const r = await bash(
@@ -224,6 +225,7 @@ async function reroute(source, to, reason) {
     return false
   }
   const from = ROUTE
+  if (ROUTES.indexOf(to) > ROUTES.indexOf(from)) requiresCodexReview = true
   ROUTE = to
   routing = await routeAll(source === 'scout' ? 'Scout' : 'Implement')
   impl = routing.IMPLEMENTATION

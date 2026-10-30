@@ -27,7 +27,8 @@ An engine disabled in `engines` is treated as unavailable. "Constrained" means
 
 The keyword classifier is the free first guess. Once per task, the scout may propose
 any route or the implementer may propose one step up or down for a clear mismatch.
-Never downgrade critical. Rerun `route_engine.py` for the new route; an upgrade into
+Never downgrade critical. An upgrade also sets `requires_codex_review`. Rerun
+`route_engine.py` for the new route; an upgrade into
 complex or critical gets an architect plan; once implementation has started, hand off
 completed and remaining work. A re-tier is not a quota fallback and does not use up the
 other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`.
