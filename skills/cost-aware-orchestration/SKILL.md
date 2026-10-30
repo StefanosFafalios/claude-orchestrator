@@ -56,7 +56,9 @@ Workflow:
    engine (or one Claude tier up), then stop and ask.
 12. For review, run `route_engine.py --role review --implementation-engine <engine>`: it
    puts the review on the other engine when both are healthy (`verifier` on Claude,
-   `codex-reviewer` on Codex).
+   `codex-reviewer` on Codex) for correctness, efficiency and security. Also run
+   `--role style_review`: when it returns claude, `style-reviewer` (haiku/low) covers
+   standards, best-practice and reduction in parallel, given the lint output if configured.
 13. If an engine exits with code 42, mark it limited
     (`engine_state.py mark-limit --engine <engine> --message "<first line>"`), create a
     handoff with `write_handoff.py` listing completed and remaining work, and delegate

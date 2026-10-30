@@ -7,7 +7,7 @@ and quota deliberately:
   critical by a deterministic keyword classifier (no LLM call), then routed to the
   cheapest sufficient Claude model and effort.
 - **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
-  `architect` (opus/high), `verifier` (sonnet/medium), and `codex-reviewer`.
+  `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), and `codex-reviewer`.
 - **Optional Codex integration** through your locally installed Codex CLI.
 - **Bidirectional quota fallback**: when Claude is near or at its limit, the remaining
   work goes to Codex, and vice versa. Review stays on the healthier engine.
@@ -135,7 +135,8 @@ implementer may correct it once per task (critical is never downgraded).
 
 **Cross-engine review.** Review always runs on the engine that did not implement, when
 it is healthy: Claude work is reviewed by Codex, and Codex work by Claude.
-Reviews also cover efficiency, best practices, security, coding standards, and code/text reduction.
+The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
+covers standards, best practices and code/text reduction (set `review.split` to false to merge them).
 
 **Test gate.** If the project's tests fail, the same engine gets one fix pass with only
 the failing output. If they still fail, the other engine (or one Claude tier up) gets

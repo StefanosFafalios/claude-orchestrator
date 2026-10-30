@@ -20,7 +20,7 @@ from classify_task import classify  # noqa: E402
 from engine_state import ConfigError, load_config, load_state  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
-AGENTS = {"scout", "implementer", "architect", "verifier", "codex-reviewer"}
+AGENTS = {"scout", "implementer", "architect", "verifier", "codex-reviewer", "style-reviewer"}
 JUSTIFIED = re.compile(r"(?im)^\s*justification\s*:|\bescalat(e|ed|ing|ion)\b")
 
 

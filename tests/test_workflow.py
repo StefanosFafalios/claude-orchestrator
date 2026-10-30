@@ -59,10 +59,48 @@ def test_standard_task_on_claude(repo):
     assert impl["agentType"] == "cost-aware-orchestrator:implementer" and impl["effort"] == "medium"
 
 
+STYLE_FINDING = {"findings": [{"severity": "low", "category": "reduction", "title": "dead helper"}]}
+
+
+def test_style_review_runs_in_parallel_and_merges(repo, write_config):
+    write_config({"commands": {"lint": "echo lint-ok"}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
+        "review:codex": {"exit_code": 0, "findings": [{"severity": "medium", "category": "correctness", "title": "bug"}]},
+        "review:style": STYLE_FINDING}})
+    style = next(c for c in out["calls"] if c["label"] == "review:style")
+    assert (style["agentType"], style["model"], style["effort"]) == ("cost-aware-orchestrator:style-reviewer", "haiku", "low")
+    assert "lint-ok" in style["prompt"]
+    lint = out["result"]["lint"]
+    assert (lint["command"], lint["exit_code"], lint["passed"]) == ("echo lint-ok", 0, True) and "lint-ok" in lint["output_tail"]
+    assert [f["severity"] for f in out["result"]["review_findings"]] == ["medium", "low"]
+    assert [f["title"] for f in out["result"]["review_findings"]] == ["bug", "dead helper"]
+    main = next(c for c in out["calls"] if c["label"] == "review:codex")
+    assert "style review is skipped" not in main["prompt"]
+
+
+def test_unsplit_review_skips_style_agent(repo, write_config):
+    write_config({"review": {"split": False}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:codex": NO_FINDINGS}})
+    assert "review:style" not in labels(out["calls"])
+    main = next(c for c in out["calls"] if c["label"] == "review:codex")
+    assert "The style review is skipped: also cover standards, best-practice and reduction." in main["prompt"]
+
+
+def test_failed_style_agent_is_not_a_failure(repo):
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:codex": NO_FINDINGS}})
+    assert "review:style" in labels(out["calls"])
+    assert out["result"]["review_findings"] == [] and out["result"]["requires_human_review"] is True
+    assert out["result"]["lint"] == {"skipped": True}
+
+
 def test_trivial_task_skips_scout_and_plan(repo):
     out = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
     assert out["result"]["implementation_model"] == "haiku"
     assert "scout" not in labels(out["calls"]) and "plan" not in labels(out["calls"])
+    assert "review:style" not in labels(out["calls"])
 
 
 def test_critical_task_plans_and_reviews_on_codex(repo):
@@ -167,7 +205,7 @@ def test_adaptive_split_sends_some_tasks_to_codex(repo):
 def test_failing_tests_get_one_fix_pass(repo, write_config):
     write_config({"commands": {"test": "test -f .fixed || { touch .fixed; echo FAIL; exit 1; }"}, "balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {
-        "scout": {"files": ["parser.py"], "impact": "x"}, "implement:claude": [DONE, DONE], "review:codex": NO_FINDINGS}})
+        "scout": {"files": ["parser.py"], "impact": "x"}, "implement:claude": [DONE, DONE], "review:codex": NO_FINDINGS, "review:style": NO_FINDINGS}})
     result = out["result"]
     assert result["tests"]["passed"] is True
     assert [e["why"] for e in result["fix_events"]] == ["fix pass on the same engine"]

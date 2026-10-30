@@ -9,7 +9,12 @@
     "review_model": "sonnet",
     "review_effort": "medium",
     "critical_review_model": "opus",
-    "critical_review_effort": "high"
+    "critical_review_effort": "high",
+    "style_review_model": "haiku",
+    "style_review_effort": "low"
+  },
+  "review": {
+    "split": true
   },
   "thresholds": {
     "near_limit_pct": 25,

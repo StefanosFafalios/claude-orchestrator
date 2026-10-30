@@ -83,6 +83,20 @@ def test_healthy_review_routing(config):
     assert (trivial["engine"], trivial["model"], trivial["effort"]) == ("claude", "haiku", "low")
 
 
+def test_style_review_routing(config, write_config):
+    style = route("style_review", "standard", config, state())
+    assert (style["engine"], style["model"], style["effort"]) == ("claude", "haiku", "low")
+    assert route("style_review", "trivial", config, state())["engine"] == "none"
+    assert route("style_review", "standard", config, state(claude="limited"))["engine"] == "none"
+    skipped = route("style_review", "standard", config, state(claude="limited"))
+    assert skipped["reason"] == "both engines constrained; main review covers style"
+    assert route("style_review", "standard", config, state(claude_pct=5))["engine"] == "none"
+    assert skipped["requires_human_review"] is False
+    write_config({"review": {"split": False}})
+    unsplit = route("style_review", "standard", load_config(), state())
+    assert (unsplit["engine"], unsplit["reason"]) == ("none", "covered by the main review")
+
+
 def test_codex_disabled(write_config):
     write_config({"engines": {"codex": False}})
     config = load_config()

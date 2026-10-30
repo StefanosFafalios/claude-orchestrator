@@ -99,6 +99,9 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     if task_route == "trivial":
         return f"{head}\nHandle it directly at the lowest effort: no subagents, no review fan-out."
 
+    style = route("style_review", task_route, config, state)
+    skip = "" if style["engine"] == "claude" else \
+        "; the style review is skipped, so also cover standards, best-practice and reduction"
     steps = []
     if task_route in ("complex", "critical"):
         scout = route("scout", task_route, config, state)
@@ -124,10 +127,14 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     else:
         steps.append("no test command is configured: say so, and rely on the review")
     if review["engine"] == "claude":
-        steps.append(f"review with {_agent('verifier', review)}")
+        steps.append(f"review with {_agent('verifier', review)}{skip}")
     elif review["engine"] == "codex":
         steps.append(f"review independently with the `{PLUGIN}:codex-reviewer` agent ({review['reason']}); "
-                     f"put the scripts directory {PLUGIN_ROOT / 'scripts'} and the task id in its prompt")
+                     f"put the scripts directory {PLUGIN_ROOT / 'scripts'} and the task id in its prompt{skip}")
+    if style["engine"] == "claude":
+        lint = " passing the lint output if a lint command is configured;"
+        steps.append(f"style review with {_agent('style-reviewer', style)},{lint} "
+                     "run it in parallel with the main review")
     numbered = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
     human = "\nQuota is constrained: one atomic task only, then ask for human review." if impl["requires_human_review"] else ""
     if impl["engine"] == "codex":

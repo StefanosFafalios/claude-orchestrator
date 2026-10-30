@@ -87,6 +87,11 @@ def test_engine_limits_block_matching_agents(project):
     assert dispatch(project, "cost-aware-orchestrator:implementer", "add tests")[0] == "allow"
 
 
+def test_style_reviewer_is_allowed(project):
+    assert dispatch(project, "cost-aware-orchestrator:style-reviewer", "review diff")[0] == "allow"
+    assert dispatch(project, "style-reviewer", "review diff")[0] == "allow"
+
+
 def test_ignores_other_agents_and_disabled_policy(project, write_config):
     assert dispatch(project, "other-plugin:architect", "fix typo")[0] == "allow"
     assert dispatch(project, "Explore", "fix typo")[0] == "allow"
@@ -102,6 +107,16 @@ def test_directive_for_standard_prompt(project, write_config):
     assert "pytest -q" in text and "one fix pass" in text
     assert "codex-reviewer" in text, "claude-implemented work is reviewed on codex"
     assert "route each plan task separately with route_engine.py --task-id <task>" in text
+
+
+def test_directive_adds_parallel_style_review(project, write_config):
+    text = context(project, "Add a subtract function to calc.py and add tests for it.")
+    assert "style review with the `cost-aware-orchestrator:style-reviewer` agent (model haiku, effort low)" in text
+    assert "in parallel with the main review" in text
+    write_config({"review": {"split": False}})
+    text = context(project, "Add a subtract function to calc.py and add tests for it.")
+    assert "style-reviewer" not in text
+    assert "; the style review is skipped, so also cover standards, best-practice and reduction" in text
 
 
 def test_directive_for_trivial_prompt_avoids_fan_out(project):

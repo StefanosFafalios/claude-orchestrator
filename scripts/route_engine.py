@@ -20,7 +20,7 @@ import sys
 
 from engine_state import ConfigError, effective_status, load_config, load_synced_state
 
-ROLES = ("implementation", "review", "scout", "architecture")
+ROLES = ("implementation", "review", "style_review", "scout", "architecture")
 ROUTES = ("trivial", "standard", "complex", "critical")
 CODEX_EFFORT = {"trivial": "low", "standard": "medium", "complex": "high", "critical": "high"}
 DEFAULT_BALANCED = ("standard", "complex")
@@ -193,6 +193,17 @@ def route_review(engines: Engines, route: str, requires_codex_review: bool,
     return _quota_route(engines, route, healthy_choice, claude_choice)
 
 
+def route_style_review(engines: Engines, route: str) -> dict:
+    """Cheap style pass (standards, best-practice, reduction) alongside the main review."""
+    # Skipping style review never needs a human: the main review covers it.
+    if not engines.config.get("review", {}).get("split", True) or route == "trivial":
+        return dict(_none("covered by the main review"), requires_human_review=False)
+    # Optional fan-out: only spend Claude quota on it while Claude is healthy.
+    if engines.healthy("claude"):
+        return _claude(engines.config, "style_review", "style review on the cheapest Claude tier")
+    return dict(_none("both engines constrained; main review covers style"), requires_human_review=False)
+
+
 def route_scout(engines: Engines, route: str) -> dict:
     config = engines.config
     if engines.healthy("claude"):
@@ -225,6 +236,8 @@ def route(role: str, task_route: str, config: dict, state: dict, requires_codex_
         if implementation_engine == "auto":
             implementation_engine = route_implementation(engines, task_route, task_key)["engine"]
         result = route_review(engines, task_route, requires_codex_review, implementation_engine)
+    elif role == "style_review":
+        result = route_style_review(engines, task_route)
     elif role == "scout":
         result = route_scout(engines, task_route)
     else:

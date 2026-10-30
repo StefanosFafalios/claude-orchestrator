@@ -190,13 +190,14 @@ async function routeAll(phaseName, implEngine = 'auto') {
       `echo ===SCOUT===`, routeCmd('scout'),
       `echo ===ARCHITECTURE===`, routeCmd('architecture'),
       `echo ===REVIEW===`, routeCmd('review'),
+      `echo ===STYLE_REVIEW===`, routeCmd('style_review'),
     ]),
     'route', phaseName,
   )
   if (r.exit_code !== 0) throw new Error(`routing failed (exit ${r.exit_code}); invalid config stops orchestration: ${r.stderr.slice(-500)}`)
   const s = sections(r.stdout)
   const out = {}
-  for (const key of ['STATE', 'CONFIG', 'IMPLEMENTATION', 'SCOUT', 'ARCHITECTURE', 'REVIEW']) out[key] = parseJson(s[key] || '', key)
+  for (const key of ['STATE', 'CONFIG', 'IMPLEMENTATION', 'SCOUT', 'ARCHITECTURE', 'REVIEW', 'STYLE_REVIEW']) out[key] = parseJson(s[key] || '', key)
   return out
 }
 let routing = await routeAll('Route')
@@ -471,16 +472,38 @@ if (fallbackEvents.length || engine !== impl.engine) routing = await routeAll('R
 let review = routing.REVIEW
 let reviewFindings = []
 let reviewEngine = review.engine
+let styleFindings = []
+const styleRoute = routing.STYLE_REVIEW
+const styleReview = styleRoute.engine === 'claude' && (result.files_changed || []).length > 0
 if (review.requires_human_review) requiresHumanReview = true
 
+const SKIP_NOTE = '\nThe style review is skipped: also cover standards, best-practice and reduction.'
 const reviewBrief = `Objective: ${TASK}
 Task id: ${TASK_ID}; route: ${ROUTE}; implemented by: ${[...enginesUsed].join(' then ')}.
 Review the current uncommitted changes (git diff HEAD plus untracked files outside .claude/).
 Files reported changed: ${(result.files_changed || []).join(', ') || '(see diff)'}
-Tests: ${tests.skipped ? 'not configured' : `${tests.command} → exit ${tests.exit_code}\n${tests.output_tail}`}`
+Tests: ${tests.skipped ? 'not configured' : `${tests.command} → exit ${tests.exit_code}\n${tests.output_tail}`}${styleReview ? '' : SKIP_NOTE}`
+
+// Cheap standards/best-practice/reduction pass; null means the agent failed.
+let lintResult = { skipped: true }
+async function runStyleReview() {
+  if (!styleReview) return []
+  const lintCommand = ((CONFIG.commands || {}).lint || '').trim()
+  let lint = 'not configured'
+  if (lintCommand) {
+    const l = await bash(`out=$( ( ${lintCommand} ) 2>&1 ); code=$?; printf '%s' "$out" | tail -c 4000; exit $code`, 'lint', 'Review', 600000)
+    lint = l.stdout
+    lintResult = { command: lintCommand, exit_code: l.exit_code, passed: l.exit_code === 0, output_tail: l.stdout.slice(-2000) }
+  }
+  const out = await agent(`${reviewBrief}\nLint output (do not repeat these findings):\n${lint}`, {
+    agentType: `${PLUGIN}:style-reviewer`, label: 'review:style', phase: 'Review', schema: FINDINGS_SCHEMA,
+    model: styleRoute.model, effort: styleRoute.effort,
+  })
+  return out ? out.findings : null
+}
 
 async function claudeReview(r) {
-  const out = await agent(reviewBrief, {
+  const out = await agent(styleReview && styleFindings !== null ? reviewBrief : reviewBrief + SKIP_NOTE, {
     agentType: `${PLUGIN}:verifier`, label: 'review:claude', phase: 'Review', schema: FINDINGS_SCHEMA, model: r.model, effort: r.effort,
   })
   return out ? out.findings : null
@@ -490,11 +513,14 @@ if (!result.ok && result.status !== 'partial') {
   reviewEngine = 'none'
   log('review skipped: implementation did not complete')
 } else if (review.engine === 'claude') {
-  reviewFindings = await claudeReview(review)
+  let style
+  ;[reviewFindings, style] = await Promise.all([claudeReview(review), runStyleReview()])
+  styleFindings = style
 } else if (review.engine === 'codex') {
-  const out = await agent(`${reviewBrief}\n\nPlugin scripts directory: ${SCRIPTS}\nWrite the request to ${RUN}/review.md.`, {
+  const [out, style] = await Promise.all([agent(`${reviewBrief}\n\nPlugin scripts directory: ${SCRIPTS}\nWrite the request to ${RUN}/review.md.`, {
     agentType: `${PLUGIN}:codex-reviewer`, label: 'review:codex', phase: 'Review', schema: FINDINGS_SCHEMA, model: 'haiku', effort: 'low',
-  })
+  }), runStyleReview()])
+  styleFindings = style
   if (out && out.exit_code === 42) {
     phase('Fallback')
     await markLimit('codex', 'Fallback')
@@ -516,7 +542,11 @@ if (!result.ok && result.status !== 'partial') {
   }
 }
 if (reviewFindings === null) { reviewFindings = []; requiresHumanReview = true; log('review agent failed; human review required') }
+if (styleFindings === null) { styleFindings = []; requiresHumanReview = true; log('style review failed; human review required') }
 if (reviewFindings.some(f => f.severity === 'blocker')) requiresHumanReview = true
+const SEVERITY = ['blocker', 'high', 'medium', 'low']
+const rank = f => (SEVERITY.indexOf(f.severity) + 5) % 5  // unknown severities sort last
+reviewFindings = [...reviewFindings, ...styleFindings].sort((a, b) => rank(a) - rank(b))
 
 // ---------------------------------------------------------------------------
 phase('Finalize')
@@ -537,6 +567,7 @@ return {
   review_findings: reviewFindings,
   files_changed: result.files_changed || [],
   tests,
+  lint: lintResult,
   fallback_events: fallbackEvents,
   reroute_events: rerouteEvents,
   fix_events: fixEvents,

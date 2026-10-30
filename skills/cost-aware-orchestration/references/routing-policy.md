@@ -74,6 +74,12 @@ one escalation to the other engine (or one Claude tier up), then stop and ask.
 
 Critical reviews on Claude use `critical_review_model` / `critical_review_effort`.
 
+With `review.split` (default true) the main review covers correctness, efficiency and
+security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /
+`style_review_effort`, haiku / low) for standards, best-practice and reduction. It is
+skipped for trivial tasks, when `review.split` is false (the main review then covers all
+six categories) or when Claude is unavailable.
+
 ## Scout
 
 Claude haiku / low when Claude is healthy. When Claude is constrained, Codex scouts only
