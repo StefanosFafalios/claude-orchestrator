@@ -17,6 +17,7 @@ and quota deliberately:
   (no network, a few milliseconds) and injects the policy plus a concrete plan for that
   prompt: which agents, models and engines to use. A broadly scoped skill backs it up.
   You don't need a slash command. Subagent reports are not re-classified.
+  Written plans, including Superpowers plans, are routed per task during execution.
 
 - **Usage tracking**: reads remaining Claude and Codex quota from local files (status
   line input, Codex session logs) and routes before an engine runs out.

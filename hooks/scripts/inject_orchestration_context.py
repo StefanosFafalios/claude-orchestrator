@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from route_engine import route  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
 SYSTEM_PROMPT_PREFIXES = ("<agent-message", "<task-notification")
+QUESTION_START = re.compile(r"^(?:what|how|why|when|where|which|who|is|are|does|do|can|could|should|would|will|explain)\b")
+CHANGE_REQUEST = re.compile(r"\b(?:add|implement|fix|change|create|update|refactor|remove|delete|write|build|make|rename|migrate|deploy|edit|modify|replace|move|rewrite)\b")
 
 POLICY = """ORCHESTRATION POLICY ACTIVE
 
@@ -75,8 +78,15 @@ def _agent(name: str, choice: dict) -> str:
     return f"the `{PLUGIN}:{name}` agent (model {choice['model']}, effort {choice['effort']})"
 
 
+def is_question(prompt: str) -> bool:
+    prompt = " ".join(prompt.lower().split())
+    return bool((prompt.endswith("?") or QUESTION_START.match(prompt)) and not CHANGE_REQUEST.search(prompt))
+
+
 def directive(prompt: str, config: dict, state: dict) -> str:
     """Concrete routing for this prompt, so the model does not have to decide to orchestrate."""
+    if is_question(prompt):
+        return "THIS PROMPT: question. Answer it directly: no subagents, no Codex, no file edits."
     cls = classify(prompt)
     task_route = cls["route"]
     task_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
@@ -126,7 +136,8 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     else:
         rule = (f"Orchestrate it (pass the model to each Agent call). If this session already runs on "
                 f"{impl['model']} or a cheaper model, you may make a small change inline, but still run tests and review.")
-    return f"{head}\n{rule}\n{numbered}{human}"
+    plan = "When executing a multi-task plan (e.g. Superpowers), route each plan task separately with route_engine.py --task-id <task> instead of dispatching generic subagents."
+    return f"{head}\n{rule}\n{numbered}\n{plan}{human}"
 
 
 def main() -> int:

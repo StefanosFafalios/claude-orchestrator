@@ -101,11 +101,29 @@ def test_directive_for_standard_prompt(project, write_config):
     assert "implement with the `cost-aware-orchestrator:implementer` agent (model sonnet" in text
     assert "pytest -q" in text and "one fix pass" in text
     assert "codex-reviewer" in text, "claude-implemented work is reviewed on codex"
+    assert "route each plan task separately with route_engine.py --task-id <task>" in text
 
 
 def test_directive_for_trivial_prompt_avoids_fan_out(project):
-    text = context(project, "What does this function do?")
+    text = context(project, "fix typo in README")
     assert "route=trivial" in text and "no subagents" in text
+
+
+def test_questions_skip_routing(project):
+    prompts = [
+        "so what is the architecture of the orchestration now?",
+        "quick question. is orchestration used with superpowers (brainstorming, writing plans, etc) inherently and automatically or do we need to do additional setup for this?",
+        "Explain the architecture",
+    ]
+    for prompt in prompts:
+        text = context(project, prompt)
+        assert "THIS PROMPT: question. Answer it directly: no subagents, no Codex, no file edits." in text
+        assert "REQUIRED" not in text
+
+
+def test_change_requests_are_routed(project):
+    for prompt in ("can you add a retry to the fetcher?", "fix the small point as well"):
+        assert "THIS PROMPT: route=" in context(project, prompt)
 
 
 def test_directive_for_critical_prompt_plans_and_reviews_on_codex(project):
