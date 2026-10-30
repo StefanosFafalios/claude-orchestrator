@@ -29,6 +29,13 @@ def test_examples(task, route):
     "store API keys encrypted at rest",
     "change the login session timeout",
     "update the payment checkout flow",
+    "fix session cookie expiry",
+    "invalidate user sessions on password reset",
+    "log out all sessions",
+    "revoke sessions",
+    "fix session middleware",
+    "update the sessions table",
+    "regenerate the session identifier",
 ])
 def test_security_sensitive_is_critical(task):
     result = classify(task)
@@ -152,3 +159,11 @@ def test_cli_reads_stdin_and_task_file(tmp_path):
 def test_llm_tokens_are_not_auth():
     assert classify("keep token usage low and split tokens across subscriptions")["route"] != "critical"
     assert classify("refresh the access token on expiry")["route"] == "critical"
+
+
+@pytest.mark.parametrize("task,route", [
+    ("update the plugin to 0.7.0 for all sessions", "standard"),
+    ("restart my tmux sessions", "standard"),
+])
+def test_bare_sessions_is_not_auth(task, route):
+    assert classify(task)["route"] == route

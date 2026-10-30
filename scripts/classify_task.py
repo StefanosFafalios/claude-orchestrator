@@ -36,7 +36,12 @@ CRITICAL = {
 
 # Sensitive domains: critical when changed, complex when only investigated.
 SENSITIVE = {
-    "auth": r"\b(auth\w*|login|logout|oauth|sso|sessions?|passwords?|permissions?|rbac|acl|jwt|"
+    # Bare "session(s)" is too common (Claude sessions, tmux sessions) to mean auth on its own.
+    "auth": r"\b(auth\w*|log ?in|log ?out|oauth|sso|passwords?|permissions?|rbac|acl|jwt|"
+    r"(user|browser|web|http|cookie|expired) sessions?|"
+    r"(revok\w*|invalidat\w*|terminat\w*) (\w+ ){0,2}sessions?|"
+    r"sessions? (cookies?|handling|management|storage|store|expir\w*|timeouts?|fixation|hijack\w*|"
+    r"ids?|identifiers?|middleware|tables?)|"
     r"(access|refresh|bearer|auth|api|session|csrf) tokens?)\b",
 }
 
