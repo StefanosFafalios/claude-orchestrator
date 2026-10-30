@@ -9,6 +9,7 @@ venv/
 # Per-project runtime state (never commit)
 .claude/engine-state.json
 .claude/orchestrator/
+.claude/orchestrator.config.json
 .claude/settings.local.json
 
 # Secrets
