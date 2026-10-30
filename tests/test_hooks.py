@@ -95,11 +95,12 @@ def test_ignores_other_agents_and_disabled_policy(project, write_config):
 
 
 def test_directive_for_standard_prompt(project, write_config):
-    write_config({"commands": {"test": "pytest -q"}})
+    write_config({"commands": {"test": "pytest -q"}, "balance": {"mode": "off"}})
     text = context(project, "Add a subtract function to calc.py and add tests for it.")
     assert "THIS PROMPT: route=standard" in text
     assert "implement with the `cost-aware-orchestrator:implementer` agent (model sonnet" in text
-    assert "pytest -q" in text and "verifier" in text
+    assert "pytest -q" in text and "one fix pass" in text
+    assert "codex-reviewer" in text, "claude-implemented work is reviewed on codex"
 
 
 def test_directive_for_trivial_prompt_avoids_fan_out(project):
@@ -137,3 +138,13 @@ def test_observed_usage_changes_routing(project, usage_files):
     text = context(project, "add unit tests for parser")
     assert "claude=near_limit(15%)" in text
     assert "implement on Codex" in text
+
+
+def test_directive_split_sends_some_standard_prompts_to_codex(project):
+    prompts = [f"add unit tests for module {i}" for i in range(20)]
+    texts = [context(project, p) for p in prompts]
+    to_codex = [t for t in texts if "implement on Codex" in t]
+    assert 0 < len(to_codex) < 20
+    for text in to_codex:
+        assert "REQUIRED (adaptive split" in text and "CODEX_EFFORT=medium" in text
+        assert "verifier" in text, "codex-implemented work is reviewed on claude"

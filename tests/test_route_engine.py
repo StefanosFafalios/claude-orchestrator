@@ -96,11 +96,13 @@ def test_claude_to_codex_fallback_disabled(write_config):
 
 
 def test_project_model_overrides(write_config):
-    write_config({"defaults": {"implementation_model": "opus", "implementation_effort": "high"}, "codex": {"default_model": "my-codex"}})
+    write_config({"defaults": {"implementation_model": "opus", "implementation_effort": "high"},
+                  "codex": {"tiers": {"standard": {"model": "my-codex", "effort": "low"}}}})
     config = load_config()
     impl = route("implementation", "standard", config, state())
     assert (impl["model"], impl["effort"]) == ("opus", "high")
-    assert route("implementation", "standard", config, state(claude="limited"))["model"] == "my-codex"
+    codex = route("implementation", "standard", config, state(claude="limited"))
+    assert (codex["model"], codex["effort"]) == ("my-codex", "low")
 
 
 def test_scout_routing(config):
@@ -115,3 +117,64 @@ def test_architecture_routing(config):
     assert route("architecture", "complex", config, state(claude="limited"))["engine"] == "codex"
     downgraded = route("architecture", "complex", config, state(claude="near_limit", codex="limited", claude_pct=20))
     assert (downgraded["engine"], downgraded["model"], downgraded["effort"]) == ("claude", "sonnet", "high")
+
+
+@pytest.mark.parametrize("task_route, model, effort", [
+    ("trivial", "gpt-6-luna", "low"),
+    ("standard", "gpt-6.1-terra", "medium"),
+    ("complex", "gpt-6.1-sol", "high"),
+])
+def test_codex_tier_equivalents_on_fallback(config, task_route, model, effort):
+    result = route("implementation", task_route, config, state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["model"], result["effort"]) == ("codex", model, effort)
+
+
+def test_critical_stays_on_claude(config):
+    assert route("implementation", "critical", config, state(claude="limited", claude_pct=0))["engine"] == "none"
+    near = route("implementation", "critical", config, state(claude="near_limit", claude_pct=20))
+    assert (near["engine"], near["model"]) == ("claude", "opus")
+    assert "switched off for critical" in near["reason"]
+    review = route("review", "critical", config, state())
+    assert (review["engine"], review["model"]) == ("codex", "gpt-6-astra"), "codex may still review critical work"
+
+
+def test_tier_switch_is_per_route(write_config):
+    write_config({"codex": {"tiers": {"standard": {"implement": False}}}})
+    config = load_config()
+    assert route("implementation", "standard", config, state(claude="limited", claude_pct=0))["engine"] == "none"
+    assert route("implementation", "complex", config, state(claude="limited", claude_pct=0))["engine"] == "codex"
+
+
+def split(config, s, task_route="standard", n=400):
+    picks = [route("implementation", task_route, config, s, task_key=f"task-{i}")["engine"] for i in range(n)]
+    return picks.count("codex") / n
+
+
+def test_adaptive_split_follows_headroom(config):
+    assert 0.4 < split(config, state(claude_pct=75, codex_pct=75)) < 0.6
+    assert split(config, state(claude_pct=95, codex_pct=35)) < 0.25
+    assert split(config, state(claude_pct=35, codex_pct=95)) > 0.75
+
+
+def test_adaptive_split_is_deterministic_and_scoped(config):
+    s = state(claude_pct=60, codex_pct=60)
+    first = route("implementation", "standard", config, s, task_key="same")
+    assert all(route("implementation", "standard", config, s, task_key="same") == first for _ in range(5))
+    assert "adaptive split" in first["reason"]
+    assert split(config, s, "trivial") == 0 and split(config, s, "critical") == 0
+    assert route("implementation", "standard", config, s)["engine"] == "claude", "no task key: no split"
+
+
+def test_adaptive_split_can_be_turned_off(write_config):
+    write_config({"balance": {"mode": "off"}})
+    assert split(load_config(), state(claude_pct=30, codex_pct=100)) == 0
+
+
+def test_cross_engine_review(config):
+    s = state()
+    assert route("review", "standard", config, s, implementation_engine="claude")["engine"] == "codex"
+    claude_review = route("review", "standard", config, s, implementation_engine="codex")
+    assert (claude_review["engine"], claude_review["model"]) == ("claude", "sonnet")
+    auto = [route("review", "standard", config, s, task_key=f"t{i}", implementation_engine="auto") for i in range(50)]
+    impls = [route("implementation", "standard", config, s, task_key=f"t{i}")["engine"] for i in range(50)]
+    assert all(r["engine"] != e for r, e in zip(auto, impls))

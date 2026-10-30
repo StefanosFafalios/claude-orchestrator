@@ -35,7 +35,8 @@ CRITICAL = {
 
 # Sensitive domains: critical when changed, complex when only investigated.
 SENSITIVE = {
-    "auth": r"\b(auth\w*|login|logout|oauth|sso|sessions?|passwords?|permissions?|rbac|acl|jwt|tokens?)\b",
+    "auth": r"\b(auth\w*|login|logout|oauth|sso|sessions?|passwords?|permissions?|rbac|acl|jwt|"
+    r"(access|refresh|bearer|auth|api|session|csrf) tokens?)\b",
 }
 
 COMPLEX = {

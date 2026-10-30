@@ -7,6 +7,7 @@ Never fails the prompt: any problem degrades to a short notice in the context.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -78,8 +79,10 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     """Concrete routing for this prompt, so the model does not have to decide to orchestrate."""
     cls = classify(prompt)
     task_route = cls["route"]
-    impl = route("implementation", task_route, config, state)
-    review = route("review", task_route, config, state, cls["requires_codex_review"])
+    task_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+    impl = route("implementation", task_route, config, state, task_key=task_key)
+    review = route("review", task_route, config, state, cls["requires_codex_review"],
+                   implementation_engine=impl["engine"])
     head = f"THIS PROMPT: route={task_route} ({cls['reason']}). If it is only a question, just answer it."
     if impl["engine"] == "none":
         return f"{head}\nNo engine available ({impl['reason']}): do not start work; ask the user how to proceed."
@@ -99,9 +102,16 @@ def directive(prompt: str, config: dict, state: dict) -> str:
         steps.append(f"implement with {_agent('implementer', impl)}")
     else:
         steps.append(f"implement on Codex ({impl['reason']}): write a handoff with write_handoff.py, then run "
-                     f"CODEX_SANDBOX=workspace-write CODEX_MODEL={impl['model']} codex_with_fallback.sh <handoff>; "
+                     f"CODEX_SANDBOX=workspace-write CODEX_MODEL={impl['model']} CODEX_EFFORT={impl['effort']} "
+                     f"codex_with_fallback.sh <handoff>; "
                      f"on exit 42 run engine_state.py mark-limit --engine codex --message \"<first line>\"")
-    steps.append(f"run the project's configured test command: {config['commands'].get('test') or '(none configured)'}")
+    test = config["commands"].get("test")
+    if test:
+        steps.append(f"run `{test}`; on failure give the same engine one fix pass with only the failing output; "
+                     f"if it still fails, hand that output to the other engine once (or one Claude tier up), "
+                     f"then stop and ask")
+    else:
+        steps.append("no test command is configured: say so, and rely on the review")
     if review["engine"] == "claude":
         steps.append(f"review with {_agent('verifier', review)}")
     elif review["engine"] == "codex":
@@ -110,8 +120,8 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     numbered = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
     human = "\nQuota is constrained: one atomic task only, then ask for human review." if impl["requires_human_review"] else ""
     if impl["engine"] == "codex":
-        rule = ("REQUIRED (quota routing, do not override for small changes): do not edit files in this Claude "
-                "session; every edit spends the constrained Claude quota.")
+        rule = (f"REQUIRED ({impl['reason']}; do not override for small changes): delegate implementation to "
+                f"Codex and do not edit files in this Claude session.")
     else:
         rule = (f"Orchestrate it (pass the model to each Agent call). If this session already runs on "
                 f"{impl['model']} or a cheaper model, you may make a small change inline, but still run tests and review.")

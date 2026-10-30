@@ -49,10 +49,10 @@ def state(project):
 
 def test_standard_task_on_claude(repo):
     out = run(repo, {"task": "add unit tests for parser", "agents": {
-        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:claude": NO_FINDINGS}})
+        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:codex": NO_FINDINGS}})
     result, calls = out["result"], out["calls"]
     assert (result["route"], result["implementation_engine"], result["implementation_model"]) == ("standard", "claude", "sonnet")
-    assert result["review_engine"] == "claude"
+    assert result["review_engine"] == "codex", "claude-implemented work is reviewed on codex"
     assert result["fallback_events"] == []
     assert "plan" not in labels(calls)
     impl = next(c for c in calls if c["label"] == "implement:claude")
@@ -143,3 +143,29 @@ def test_configured_tests_run(repo, write_config):
         "scout": {"files": [], "impact": "x"}, "implement:claude": DONE, "review:claude": NO_FINDINGS}})
     tests = out["result"]["tests"]
     assert tests["exit_code"] == 3 and tests["passed"] is False and "tests-ran" in tests["output_tail"]
+
+
+def test_adaptive_split_sends_some_tasks_to_codex(repo):
+    engines = set()
+    for i in range(8):
+        out = run(repo, {"task": f"add unit tests for module {i}", "agents": {
+            "scout": {"files": [], "impact": "x"}, "implement:claude": DONE,
+            "review:claude": NO_FINDINGS, "review:codex": NO_FINDINGS}})
+        result = out["result"]
+        engines.add(result["implementation_engine"])
+        assert result["review_engine"] != result["implementation_engine"]
+        if result["implementation_engine"] == "codex":
+            assert result["implementation_model"] == "gpt-6.1-terra"
+    assert engines == {"claude", "codex"}
+
+
+def test_failing_tests_get_one_fix_pass(repo, write_config):
+    write_config({"commands": {"test": "test -f .fixed || { touch .fixed; echo FAIL; exit 1; }"}, "balance": {"mode": "off"}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "x"}, "implement:claude": [DONE, DONE], "review:codex": NO_FINDINGS}})
+    result = out["result"]
+    assert result["tests"]["passed"] is True
+    assert [e["why"] for e in result["fix_events"]] == ["fix pass on the same engine"]
+    fix_prompt = [c for c in out["calls"] if c["label"] == "implement:claude"][1]["prompt"]
+    assert "handoffs/" in fix_prompt
+    assert result["requires_human_review"] is False

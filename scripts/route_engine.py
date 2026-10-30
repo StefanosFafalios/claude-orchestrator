@@ -4,11 +4,17 @@
 Reads the merged configuration and ``.claude/engine-state.json`` and prints JSON:
 ``{"engine", "model", "effort", "reason", "requires_human_review", "scope"}``.
 ``engine`` is ``claude``, ``codex`` or ``none``.
+
+Each task route has a Claude tier (``defaults``) and a Codex equivalent
+(``codex.tiers``); ``codex.tiers.<route>.implement`` switches Codex implementation of
+that route on or off. With ``balance.mode`` ``adaptive`` and a ``--task-id``, healthy
+engines share balanced routes in proportion to their distance from the near-limit line.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 
@@ -17,6 +23,7 @@ from engine_state import ConfigError, effective_status, load_config, load_synced
 ROLES = ("implementation", "review", "scout", "architecture")
 ROUTES = ("trivial", "standard", "complex", "critical")
 CODEX_EFFORT = {"trivial": "low", "standard": "medium", "complex": "high", "critical": "high"}
+DEFAULT_BALANCED = ("standard", "complex")
 
 
 class Engines:
@@ -41,8 +48,23 @@ class Engines:
     def remaining(self, engine: str) -> float:
         return float(self.state[engine].get("remaining_pct", 0))
 
+    def headroom(self, engine: str) -> float:
+        """Percentage points above the near-limit line."""
+        return max(0.0, self.remaining(engine) - self.config["thresholds"]["near_limit_pct"])
+
     def fallback_allowed(self, src: str, dst: str) -> bool:
         return bool(self.config.get("fallback", {}).get(f"{src}_to_{dst}", True))
+
+
+def codex_tier(config: dict, route: str) -> dict:
+    """Codex model/effort for a route, and whether Codex may implement it."""
+    codex = config.get("codex", {})
+    tier = codex.get("tiers", {}).get(route) or {}
+    return {
+        "model": tier.get("model") or codex.get("default_model", ""),
+        "effort": tier.get("effort") or CODEX_EFFORT[route],
+        "implement": bool(tier.get("implement", True)),
+    }
 
 
 def _claude(config: dict, key: str, reason: str) -> dict:
@@ -55,32 +77,32 @@ def _claude_tier(model: str, effort: str, reason: str) -> dict:
 
 
 def _codex(config: dict, route: str, reason: str) -> dict:
-    return {
-        "engine": "codex",
-        "model": config.get("codex", {}).get("default_model", ""),
-        "effort": CODEX_EFFORT[route],
-        "reason": reason,
-    }
+    tier = codex_tier(config, route)
+    return {"engine": "codex", "model": tier["model"], "effort": tier["effort"], "reason": reason}
 
 
 def _none(reason: str) -> dict:
     return {"engine": "none", "model": "", "effort": "", "reason": reason}
 
 
-def _quota_route(engines: Engines, route: str, healthy_choice: dict, claude_choice: dict) -> dict:
+def _quota_route(engines: Engines, route: str, healthy_choice: dict, claude_choice: dict,
+                 codex_allowed: bool = True) -> dict:
     """Shared quota logic for implementation and review.
 
     ``healthy_choice`` applies when both engines are healthy; ``claude_choice`` is the
-    Claude tier to use when quota forces Claude.
+    Claude tier to use when quota forces Claude. ``codex_allowed`` False keeps the work
+    on Claude (the route's Codex switch is off).
     """
     config = engines.config
-    claude_ok, codex_ok = engines.usable("claude"), engines.usable("codex")
-    # Claude is the primary engine; Codex only takes Claude's work when that direction is allowed.
+    claude_ok = engines.usable("claude")
+    codex_ok = engines.usable("codex") and codex_allowed
+    # Codex only takes Claude's work when that direction is allowed.
     if engines.constrained("claude") and not engines.fallback_allowed("claude", "codex"):
         codex_ok = False
 
     if not claude_ok and not codex_ok:
-        return _none("no engine available (limited, disabled or fallback not allowed)")
+        why = "" if codex_allowed else f"; codex implementation is switched off for {route} tasks"
+        return _none(f"no engine available (limited, disabled or fallback not allowed){why}")
     if claude_ok and codex_ok:
         c_con, x_con = engines.constrained("claude"), engines.constrained("codex")
         if c_con and x_con:
@@ -94,7 +116,10 @@ def _quota_route(engines: Engines, route: str, healthy_choice: dict, claude_choi
         return healthy_choice
     only = "claude" if claude_ok else "codex"
     other = "codex" if only == "claude" else "claude"
-    why = "disabled" if not engines.enabled[other] else engines.status[other]
+    if other == "codex" and not codex_allowed:
+        why = f"switched off for {route} tasks"
+    else:
+        why = "disabled" if not engines.enabled[other] else engines.status[other]
     reason = f"{other} is {why}; using {only}"
     if engines.constrained(only):
         return _constrained(engines, route, only, claude_choice, reason + f" (itself {engines.status[only]})")
@@ -112,7 +137,27 @@ def _constrained(engines: Engines, route: str, engine: str, claude_choice: dict,
     return choice
 
 
-def route_implementation(engines: Engines, route: str) -> dict:
+def _bucket(task_key: str) -> float:
+    """Deterministic position in [0, 1) for a task, so the same task always routes the same way."""
+    return int(hashlib.sha256(task_key.encode("utf-8")).hexdigest()[:8], 16) / 2**32
+
+
+def _balanced(engines: Engines, route: str, task_key: str | None, claude_choice: dict) -> dict:
+    """Adaptive split between two healthy engines, weighted by headroom to the limit."""
+    balance = engines.config.get("balance", {})
+    if (balance.get("mode", "adaptive") != "adaptive" or not task_key
+            or route not in balance.get("routes", DEFAULT_BALANCED)
+            or not codex_tier(engines.config, route)["implement"] or not engines.healthy("codex")):
+        return claude_choice
+    c_room, x_room = engines.headroom("claude"), engines.headroom("codex")
+    codex_share = x_room / (c_room + x_room) if c_room + x_room else 0.5
+    detail = f"codex share {codex_share:.0%}; headroom claude {c_room:g} pts, codex {x_room:g} pts"
+    if _bucket(task_key) < codex_share:
+        return _codex(engines.config, route, f"adaptive split ({detail})")
+    return dict(claude_choice, reason=f"adaptive split ({detail})")
+
+
+def route_implementation(engines: Engines, route: str, task_key: str | None = None) -> dict:
     config = engines.config
     tiers = {
         "trivial": _claude(config, "scout", "trivial task: cheapest Claude tier"),
@@ -121,10 +166,14 @@ def route_implementation(engines: Engines, route: str) -> dict:
                                 "complex task: implementation model at high effort; escalate to architect only if needed"),
         "critical": _claude(config, "architect", "critical task: strongest Claude tier"),
     }
-    return _quota_route(engines, route, tiers[route], tiers[route])
+    claude_choice = tiers[route]
+    healthy_choice = _balanced(engines, route, task_key, claude_choice)
+    return _quota_route(engines, route, healthy_choice, claude_choice, codex_tier(config, route)["implement"])
 
 
-def route_review(engines: Engines, route: str, requires_codex_review: bool) -> dict:
+def route_review(engines: Engines, route: str, requires_codex_review: bool,
+                 implementation_engine: str | None = None) -> dict:
+    """Review on the engine that did not implement, when both are healthy."""
     config = engines.config
     if route == "critical":
         claude_choice = _claude(config, "critical_review", "critical review on Claude")
@@ -133,8 +182,11 @@ def route_review(engines: Engines, route: str, requires_codex_review: bool) -> d
     else:
         claude_choice = _claude(config, "review", "focused Claude review")
 
-    wants_codex = route == "critical" or (route == "complex" and requires_codex_review)
-    if wants_codex and engines.healthy("codex"):
+    if implementation_engine == "codex":
+        healthy_choice = dict(claude_choice, reason="cross-engine review: codex implemented, claude reviews")
+    elif implementation_engine == "claude" and engines.healthy("codex"):
+        healthy_choice = _codex(config, route, "cross-engine review: claude implemented, codex reviews")
+    elif (route == "critical" or (route == "complex" and requires_codex_review)) and engines.healthy("codex"):
         healthy_choice = _codex(config, route, "independent adversarial review on a different engine")
     else:
         healthy_choice = claude_choice
@@ -163,12 +215,16 @@ def route_architecture(engines: Engines, route: str) -> dict:
     return _none("no engine available for architecture")
 
 
-def route(role: str, task_route: str, config: dict, state: dict, requires_codex_review: bool = False) -> dict:
+def route(role: str, task_route: str, config: dict, state: dict, requires_codex_review: bool = False,
+          task_key: str | None = None, implementation_engine: str | None = None) -> dict:
+    """``implementation_engine`` ``"auto"`` derives the implementer from ``task_key``."""
     engines = Engines(config, state)
     if role == "implementation":
-        result = route_implementation(engines, task_route)
+        result = route_implementation(engines, task_route, task_key)
     elif role == "review":
-        result = route_review(engines, task_route, requires_codex_review)
+        if implementation_engine == "auto":
+            implementation_engine = route_implementation(engines, task_route, task_key)["engine"]
+        result = route_review(engines, task_route, requires_codex_review, implementation_engine)
     elif role == "scout":
         result = route_scout(engines, task_route)
     else:
@@ -184,13 +240,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task-route", choices=ROUTES, default="standard")
     parser.add_argument("--requires-codex-review", action="store_true",
                         help="classifier flag; makes complex reviews prefer codex")
+    parser.add_argument("--task-id", help="stable task key; enables the adaptive split")
+    parser.add_argument("--implementation-engine", choices=("claude", "codex", "auto"),
+                        help="review only: review on the other engine ('auto' derives it from --task-id)")
     args = parser.parse_args(argv)
     try:
         config = load_config()
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(route(args.role, args.task_route, config, load_synced_state(config), args.requires_codex_review), indent=2))
+    result = route(args.role, args.task_route, config, load_synced_state(config), args.requires_codex_review,
+                   args.task_id, args.implementation_engine)
+    print(json.dumps(result, indent=2))
     return 0
 
 

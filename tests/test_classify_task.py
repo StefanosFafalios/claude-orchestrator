@@ -89,3 +89,8 @@ def test_cli_reads_stdin_and_task_file(tmp_path):
     task_file.write_text("rotate production credentials")
     out = subprocess.run([sys.executable, script, "--task-file", str(task_file)], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout)["route"] == "critical"
+
+
+def test_llm_tokens_are_not_auth():
+    assert classify("keep token usage low and split tokens across subscriptions")["route"] != "critical"
+    assert classify("refresh the access token on expiry")["route"] == "critical"

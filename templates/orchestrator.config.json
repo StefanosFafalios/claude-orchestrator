@@ -42,6 +42,16 @@
   },
   "codex": {
     "default_model": "gpt-6.1-sol",
-    "max_files_per_fallback": 5
+    "max_files_per_fallback": 5,
+    "tiers": {
+      "trivial": { "model": "gpt-6-luna", "effort": "low", "implement": true },
+      "standard": { "model": "gpt-6.1-terra", "effort": "medium", "implement": true },
+      "complex": { "model": "gpt-6.1-sol", "effort": "high", "implement": true },
+      "critical": { "model": "gpt-6-astra", "effort": "high", "implement": false }
+    }
+  },
+  "balance": {
+    "mode": "adaptive",
+    "routes": ["standard", "complex"]
   }
 }

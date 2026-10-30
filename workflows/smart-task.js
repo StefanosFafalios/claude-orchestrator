@@ -10,6 +10,7 @@ export const meta = {
     { title: 'Plan', detail: 'architect pass for complex or critical tasks' },
     { title: 'Implement', detail: 'routed engine implements' },
     { title: 'Test', detail: 'configured project test command' },
+    { title: 'Fix', detail: 'failing tests: one fix pass, then one escalation' },
     { title: 'Review', detail: 'independent review, preferably on the other engine' },
     { title: 'Fallback', detail: 'usage limit: mark engine, write handoff, switch' },
     { title: 'Finalize', detail: 'record results in engine state' },
@@ -166,8 +167,13 @@ const CODEX_REVIEW_FLAG = classification.requires_codex_review ? ' --requires-co
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
 phase('Route')
-async function routeAll(phaseName) {
-  const routeCmd = role => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${role === 'review' ? CODEX_REVIEW_FLAG : ''}`
+// implEngine 'auto' lets the router derive the implementer, so review lands on the other engine.
+async function routeAll(phaseName, implEngine = 'auto') {
+  const extra = {
+    implementation: ` --task-id ${q(TASK_ID)}`,
+    review: ` --task-id ${q(TASK_ID)} --implementation-engine ${implEngine}${CODEX_REVIEW_FLAG}`,
+  }
+  const routeCmd = role => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${extra[role] || ''}`
   const r = await bash(
     script([
       `mkdir -p ${q(RUN)}`,
@@ -219,10 +225,12 @@ function claudeTier() {
 }
 
 function codexTier() {
-  return { model: (CONFIG.codex || {}).default_model || '', effort: CODEX_EFFORT[ROUTE] }
+  const codex = CONFIG.codex || {}
+  const t = (codex.tiers || {})[ROUTE] || {}
+  return { model: t.model || codex.default_model || '', effort: t.effort || CODEX_EFFORT[ROUTE], implement: t.implement !== false }
 }
 
-async function writeHandoff(source, target, completed, remaining, files, phaseName) {
+async function writeHandoff(source, target, completed, remaining, files, phaseName, testOutput = '') {
   const maxFiles = (CONFIG.codex || {}).max_files_per_fallback || 5
   const fileArgs = files.slice(0, target === 'codex' ? maxFiles : files.length).map(f => ` --relevant-file ${q(f)}`).join('')
   const r = await bash(
@@ -231,9 +239,11 @@ async function writeHandoff(source, target, completed, remaining, files, phaseNa
       heredoc(`${RUN}/task.txt`, TASK),
       heredoc(`${RUN}/completed.txt`, completed),
       heredoc(`${RUN}/remaining.txt`, remaining),
+      heredoc(`${RUN}/test-output.txt`, testOutput),
       `${PY('write_handoff.py')} --task-id ${q(TASK_ID)} --objective @${q(`${RUN}/task.txt`)} --task-route ${ROUTE}` +
         ` --source-engine ${q(source)} --target-engine ${target}` +
-        ` --completed-work @${q(`${RUN}/completed.txt`)} --remaining-work @${q(`${RUN}/remaining.txt`)}${fileArgs}`,
+        ` --completed-work @${q(`${RUN}/completed.txt`)} --remaining-work @${q(`${RUN}/remaining.txt`)}` +
+        ` --test-output @${q(`${RUN}/test-output.txt`)}${fileArgs}`,
     ]),
     `handoff:${target}`, phaseName,
   )
@@ -324,6 +334,7 @@ async function markLimit(engine, phaseName) {
 }
 
 function fallbackAllowed(from, to) {
+  if (to === 'codex' && !codexTier().implement) return false  // e.g. critical work stays on Claude
   return (CONFIG.engines || {})[to] !== false && (CONFIG.fallback || {})[`${from}_to_${to}`] !== false
 }
 
@@ -367,17 +378,51 @@ while (true) {
 phase('Test')
 const testCommand = ((CONFIG.commands || {}).test || '').trim()
 let tests = { command: testCommand || null, skipped: true }
-if (testCommand && result.ok !== false) {
+const fixEvents = []
+
+async function runTests(label, phaseName) {
   const t = await bash(
     `mkdir -p ${q(RUN)}; ( ${testCommand} ) > ${q(`${RUN}/test.out`)} 2>&1; code=$?; tail -c 4000 ${q(`${RUN}/test.out`)}; exit $code`,
-    'test', 'Test', 600000,
+    label, phaseName, 600000,
   )
-  tests = { command: testCommand, skipped: false, exit_code: t.exit_code, passed: t.exit_code === 0, output_tail: t.stdout.slice(-2000) }
+  return { command: testCommand, skipped: false, exit_code: t.exit_code, passed: t.exit_code === 0, output_tail: t.stdout.slice(-2000) }
+}
+
+if (testCommand && result.ok !== false) {
+  tests = await runTests('test', 'Test')
+  // Quality ladder, bounded: one fix pass on the same engine, then one escalation.
+  const other = engine === 'claude' ? 'codex' : 'claude'
+  const limitedNow = new Set(fallbackEvents.map(e => e.from))
+  const attempts = [{ engine, tier, why: 'fix pass on the same engine' }]
+  if (fallbackAllowed(engine, other) && !limitedNow.has(other)) {
+    attempts.push({ engine: other, tier: other === 'codex' ? codexTier() : claudeTier(), why: 'escalation to the other engine' })
+  } else if (engine === 'claude') {
+    attempts.push({ engine, tier: { model: CONFIG.defaults.architect_model, effort: CONFIG.defaults.architect_effort }, why: 'escalation one Claude tier up' })
+  }
+  for (const a of attempts) {
+    if (tests.passed) break
+    phase('Fix')
+    log(`tests failed (exit ${tests.exit_code}): ${a.why} (${a.engine} ${a.tier.model})`)
+    const hp = await writeHandoff(engine, a.engine, 'The implementation is in the current diff; the project tests fail.',
+      'Make the failing tests pass with the smallest change. Do not rewrite or broaden the implementation.',
+      result.files_changed && result.files_changed.length ? result.files_changed : scoutFiles, 'Fix', tests.output_tail)
+    const out = a.engine === 'claude' ? await runClaude(a.tier, hp) : await runCodex(a.tier, hp)
+    enginesUsed.add(a.engine)
+    if (out.limited) {
+      await markLimit(a.engine, 'Fix')
+      fallbackEvents.push({ phase: 'fix', from: a.engine, to: null, reason: `${a.engine} usage limit during fix` })
+      break
+    }
+    fixEvents.push({ engine: a.engine, model: a.tier.model, why: a.why })
+    result.files_changed = [...new Set([...(result.files_changed || []), ...(out.files_changed || [])])]
+    tests = await runTests(`test:after-${a.engine}`, 'Fix')
+  }
+  if (!tests.passed) requiresHumanReview = true
 }
 
 // ---------------------------------------------------------------------------
 phase('Review')
-if (fallbackEvents.length) routing = await routeAll('Review')
+if (fallbackEvents.length || engine !== impl.engine) routing = await routeAll('Review', engine)
 let review = routing.REVIEW
 let reviewFindings = []
 let reviewEngine = review.engine
@@ -448,6 +493,7 @@ return {
   files_changed: result.files_changed || [],
   tests,
   fallback_events: fallbackEvents,
+  fix_events: fixEvents,
   requires_human_review: requiresHumanReview,
   summary: result.summary,
   remaining_work: result.remaining_work || '',

@@ -23,27 +23,41 @@ An engine disabled in `engines` is treated as unavailable. "Constrained" means
 | complex | multi-file investigation, debugging, architecture, unknown root cause | sonnet / high, escalate to opus / high only if needed |
 | critical | production, security, migrations, auth/payment changes, irreversible or high blast-radius work | opus / high for planning and review |
 
+## Codex tiers
+
+Each route has a Codex equivalent in `codex.tiers` (model, effort, `implement` switch).
+Defaults: trivial `gpt-6-luna`/low, standard `gpt-6.1-terra`/medium, complex
+`gpt-6.1-sol`/high, critical `gpt-6-astra`/high with `implement: false`. Critical work is
+never implemented on Codex, but Codex may still review it.
+
 ## Implementation
 
 | Claude | Codex | Engine |
 |---|---|---|
-| healthy | healthy | Claude at the route's tier |
+| healthy | healthy | adaptive split for `balance.routes` (standard, complex): Codex share = Codex headroom ÷ total headroom, by task hash; otherwise Claude |
 | healthy | near_limit / limited | Claude |
-| near_limit | healthy | Codex |
-| limited | healthy / near_limit | Codex |
+| near_limit | healthy | Codex at the equivalent tier, if the tier allows it |
+| limited | healthy / near_limit | Codex at the equivalent tier, if the tier allows it |
 | constrained | constrained | engine with more remaining quota; one atomic task; human review |
 | limited | limited | none; human review |
 
-`fallback.claude_to_codex: false` stops Claude's work moving to Codex.
+Headroom = remaining % − `thresholds.near_limit_pct`. `fallback.claude_to_codex: false`
+stops Claude's work moving to Codex. A tier with `implement: false` and Claude
+unavailable returns `engine: none`.
+
+## Test gate
+
+On a test failure: one fix pass on the same engine with only the failing output, then
+one escalation to the other engine (or one Claude tier up), then stop and ask.
 
 ## Review
 
 | Condition | Engine |
 |---|---|
+| both healthy, implementer known | the other engine (cross-engine review) |
 | both healthy, critical | Codex (independent adversarial review) |
 | both healthy, complex, classifier set `requires_codex_review` | Codex |
-| both healthy, complex otherwise / standard | Claude sonnet / medium |
-| both healthy, trivial | Claude haiku / low |
+| both healthy otherwise | Claude: sonnet / medium (trivial: haiku / low) |
 | Codex constrained | Claude |
 | Claude constrained | Codex |
 | both constrained | more remaining quota; human review |

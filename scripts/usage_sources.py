@@ -42,11 +42,12 @@ def observation(windows: list, observed_at: float, source: str, now: float) -> d
     if not known:
         return None
     active = [(used, reset) for used, reset in known if reset is None or reset > now]
-    upcoming = [reset for _, reset in active if reset is not None]
+    # The most-used window binds: its reset, not the soonest one, is when quota returns.
+    used, resets_at = max(active, default=(0.0, None), key=lambda window: window[0])
     return {
-        "remaining_pct": round(max(0.0, 100.0 - max((used for used, _ in active), default=0.0)), 1),
+        "remaining_pct": round(max(0.0, 100.0 - used), 1),
         "observed_at": observed_at,
-        "resets_at": min(upcoming) if upcoming else None,
+        "resets_at": resets_at,
         "windows_reset": not active,
         "source": source,
     }

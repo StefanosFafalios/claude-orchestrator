@@ -81,3 +81,10 @@ def test_usage_sync_can_be_disabled(project, usage_files, write_config):
     write_codex(usage_files, primary=100)
     main(["sync"])
     assert load_state()["codex"]["status"] == "healthy"
+
+
+def test_reset_time_comes_from_the_binding_window(usage_files):
+    write_claude(usage_files, five=12, seven=98, reset_in=3600)
+    obs = claude_usage()
+    assert obs["remaining_pct"] == 2
+    assert obs["resets_at"] > NOW + 80000, "weekly window binds, not the sooner 5-hour reset"

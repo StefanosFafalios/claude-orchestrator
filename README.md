@@ -116,17 +116,43 @@ Without a command, the policy still applies:
 
 ## Routing policy
 
-| Route | Examples | Implementation | Review (both healthy) |
-|---|---|---|---|
-| trivial | typo, rename, lookup | haiku / low | haiku / low |
-| standard | feature, tests, docs | sonnet / medium | sonnet / medium |
-| complex | debugging, multi-file, architecture | sonnet / high, escalate to opus | sonnet / medium, or Codex if flagged |
-| critical | production, security, migrations, auth/payment | opus / high | Codex (independent) |
+| Route | Examples | Claude tier | Codex equivalent | Codex may implement |
+|---|---|---|---|---|
+| trivial | typo, rename, lookup | haiku / low | `gpt-6-luna` / low | yes (inline on Claude by default) |
+| standard | feature, tests, docs | sonnet / medium | `gpt-6.1-terra` / medium | yes |
+| complex | debugging, multi-file | sonnet / high, escalate to opus | `gpt-6.1-sol` / high | yes |
+| critical | production, security, migrations, auth/payment | opus / high | `gpt-6-astra` / high (review only) | **no**: stays on Claude |
 
-When Claude is constrained (near limit or limited), work goes to Codex. When Codex is
-constrained, work goes to Claude. When both are constrained, the engine with more
-remaining quota does one atomic task and a human reviews. Full table:
+**Adaptive split.** When both engines are healthy, standard and complex tasks are
+shared in proportion to each engine's headroom (remaining quota above the near-limit
+line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
+one subscription gets closer to its limit, more work goes to the other. The choice is a
+deterministic hash of the task, so the same task always routes the same way.
+
+**Cross-engine review.** Review always runs on the engine that did not implement, when
+it is healthy: Claude work is reviewed by Codex, and Codex work by Claude.
+
+**Test gate.** If the project's tests fail, the same engine gets one fix pass with only
+the failing output. If they still fail, the other engine (or one Claude tier up) gets
+one try, then it stops and asks you.
+
+When an engine is constrained (near limit or limited), its work goes to the other
+engine at the equivalent tier, unless that tier's `implement` switch is off. When both
+are constrained, the engine with more remaining quota does one atomic task and a human
+reviews. Full table:
 [`skills/cost-aware-orchestration/references/routing-policy.md`](skills/cost-aware-orchestration/references/routing-policy.md).
+
+Tune it per project:
+
+```json
+{
+  "codex": { "tiers": { "standard": { "model": "gpt-6.1-sol", "effort": "medium", "implement": true } } },
+  "balance": { "mode": "adaptive", "routes": ["standard", "complex"] }
+}
+```
+
+Set `"balance": {"mode": "off"}` to keep Claude as the primary engine, so Codex works
+only as a fallback and reviewer.
 
 ## Fallback behavior
 
