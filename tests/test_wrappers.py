@@ -1,6 +1,7 @@
 """Wrapper exit-code contract, using fake CLIs (never the real claude/codex)."""
 
 import os
+import stat
 import subprocess
 
 import pytest
@@ -75,6 +76,25 @@ def test_codex_sandbox_and_model_flags(tmp_path, monkeypatch):
     args = (tmp_path / "args").read_text()
     assert "exec --sandbox workspace-write --model m1" in args
     assert "do the thing" in args
+
+
+@pytest.mark.parametrize("stderr, code, expected, echoed", [("step 1\nstep 2\n", 0, 0, False),
+                                                              ("Usage limit reached. Upgrade", 1, 42, True),
+                                                              ("TypeError: boom", 1, 1, True)])
+def test_codex_progress_file_receives_stderr(tmp_path, monkeypatch, stderr, code, expected, echoed):
+    progress = tmp_path / "progress.log"
+    monkeypatch.setenv("CODEX_PROGRESS_FILE", str(progress))
+    r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stdout="ok", stderr=stderr, code=code)
+    assert r.returncode == expected
+    assert progress.read_text() == stderr
+    assert stat.S_IMODE(progress.stat().st_mode) == 0o600
+    assert (stderr in r.stderr) == echoed
+
+
+def test_codex_unwritable_progress_file_exits_1(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_PROGRESS_FILE", str(tmp_path / "missing" / "progress.log"))
+    r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stdout="ok")
+    assert r.returncode == 1 and "CODEX_PROGRESS_FILE" in r.stderr
 
 
 @pytest.mark.parametrize("wrapper", ["claude_with_fallback.sh", "codex_with_fallback.sh"])

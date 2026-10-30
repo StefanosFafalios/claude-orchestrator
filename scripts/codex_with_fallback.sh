@@ -4,7 +4,8 @@
 # Usage: codex_with_fallback.sh <task-or-handoff-file>
 # Exit codes: 0 success, 42 usage limit (prints CODEX_USAGE_LIMIT), 1 other failure, 2 bad usage.
 # Env: CODEX_BIN (default: codex), CODEX_MODEL, CODEX_EFFORT (low|medium|high),
-#      CODEX_SANDBOX (read-only|workspace-write; default read-only).
+#      CODEX_SANDBOX (read-only|workspace-write; default read-only),
+#      CODEX_PROGRESS_FILE (optional; write Codex stderr to this file live, mode 0600).
 set -uo pipefail
 
 if [[ $# -ne 1 || ! -f "$1" ]]; then
@@ -17,8 +18,17 @@ weak_re='upgrade|resets'
 ordinary_re='unauthori[sz]ed|authenticat|not logged in|log ?in required|invalid api key|permission denied|forbidden|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network|could not resolve|timed out'
 
 out_file=$(mktemp)
-err_file=$(mktemp)
-trap 'rm -f "$out_file" "$err_file"' EXIT
+if [[ -n "${CODEX_PROGRESS_FILE:-}" ]]; then
+  err_file=$CODEX_PROGRESS_FILE  # kept after exit so it can be tailed
+  if ! install -m 600 /dev/null "$err_file"; then
+    echo "cannot create CODEX_PROGRESS_FILE: $err_file" >&2
+    exit 1
+  fi
+  trap 'rm -f "$out_file"' EXIT
+else
+  err_file=$(mktemp)
+  trap 'rm -f "$out_file" "$err_file"' EXIT
+fi
 
 args=(exec --sandbox "${CODEX_SANDBOX:-read-only}")
 [[ -n "${CODEX_MODEL:-}" ]] && args+=(--model "$CODEX_MODEL")

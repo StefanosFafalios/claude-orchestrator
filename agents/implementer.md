@@ -16,6 +16,7 @@ Rules:
 - Run only relevant tests, linting, and typechecks configured in
   `.claude/orchestrator.config.json`.
 - Report changed files, commands run, test results, and remaining risks.
+- End with an "Approach and decisions" section: what was done, why, and alternatives rejected.
 - Stop and ask for guidance if the task becomes ambiguous or high-risk.
 
 Coding standards:

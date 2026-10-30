@@ -36,6 +36,7 @@ def test_handoff_contains_contract_and_diff(project, write_config, capsys):
         "- Test: pytest -q",
         "- Typecheck: (not configured)",
         "## Output contract",
+        'End with an "Approach and decisions" section',
         "## Do not redo\nAdded retry decorator to webhook client",
         "Co-Authored-By",
     ):

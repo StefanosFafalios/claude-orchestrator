@@ -109,6 +109,15 @@ def test_directive_for_standard_prompt(project, write_config):
     assert "route each plan task separately with route_engine.py --task-id <task>" in text
 
 
+def test_directive_visibility_only_for_non_trivial_routes(project, write_config):
+    write_config({"balance": {"mode": "off"}})
+    text = context(project, "Add a subtract function to calc.py and add tests for it.")
+    assert "Visibility:" in text and "CODEX_PROGRESS_FILE=<handoff>.progress.log" in text
+    assert "watch live: tail -f" in text and "Monitor" not in text
+    assert "Visibility:" not in context(project, "fix typo in README")
+    assert "Visibility:" not in context(project, "How does the router pick an engine?")
+
+
 def test_directive_adds_parallel_style_review(project, write_config):
     text = context(project, "Add a subtract function to calc.py and add tests for it.")
     assert "style review with the `cost-aware-orchestrator:style-reviewer` agent (model haiku, effort low)" in text
@@ -182,3 +191,42 @@ def test_directive_split_sends_some_standard_prompts_to_codex(project):
     for text in to_codex:
         assert "REQUIRED (adaptive split" in text and "CODEX_EFFORT=medium" in text
         assert "verifier" in text, "codex-implemented work is reviewed on claude"
+
+
+def test_follow_up_uses_transcript(project, tmp_path):
+    transcript = tmp_path / "transcript.jsonl"
+    entries = [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Should I commit and push?"}]}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Want me to implement the retry queue across services?"}]}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use"}]}},
+        {"type": "assistant", "isSidechain": True, "message": {"content": [{"type": "text", "text": "Should I deploy?"}]}},
+    ]
+    transcript.write_text("\n".join(json.dumps(entry) for entry in entries) + '\n["assistant"]\n{invalid assistant')
+    payload = {"prompt": "yes", "transcript_path": str(transcript)}
+    text = run_hook("inject_orchestration_context.py", payload, project)["hookSpecificOutput"]["additionalContext"]
+    assert "route=complex (follow-up to:" in text
+    assert "route=standard (follow-up without context" in context(project, "yes")
+    transcript.write_text("{invalid")
+    text = run_hook("inject_orchestration_context.py", payload, project)["hookSpecificOutput"]["additionalContext"]
+    assert "route=standard (follow-up without context" in text
+
+
+def test_contextless_follow_up_keys_include_session(monkeypatch, project):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("inject_context", HOOKS / "inject_orchestration_context.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    keys = []
+    original_route = module.route
+
+    def capture_route(*args, **kwargs):
+        if "task_key" in kwargs:
+            keys.append(kwargs["task_key"])
+        return original_route(*args, **kwargs)
+
+    monkeypatch.setattr(module, "route", capture_route)
+    config = module.load_config(project)
+    state = module.load_synced_state(config, project)
+    module.directive("yes", config, state, session_id="one")
+    module.directive("yes", config, state, session_id="two")
+    assert keys[0] != keys[1]

@@ -54,6 +54,7 @@ Return:
 3. Tests run and results
 4. Remaining risks
 5. Any work intentionally not completed
+6. End with an "Approach and decisions" section: what was done, why, and alternatives rejected.
 
 ## Do not redo
 {{completed_work}}

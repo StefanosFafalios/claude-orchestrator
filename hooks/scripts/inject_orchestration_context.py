@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from classify_task import classify  # noqa: E402
+from classify_task import classify, effective_text, is_follow_up  # noqa: E402
 from engine_state import (  # noqa: E402
     PLUGIN_ROOT,
     ConfigError,
@@ -48,7 +48,7 @@ Do not run the full workflow for trivial conversational requests."""
 DISABLED = "ORCHESTRATION POLICY DISABLED"
 
 
-def build_context(root: Path, prompt: str = "") -> str:
+def build_context(root: Path, prompt: str = "", replying_to: str = "", session_id: str = "") -> str:
     try:
         config = load_config(root)
     except ConfigError as exc:
@@ -70,7 +70,7 @@ def build_context(root: Path, prompt: str = "") -> str:
             '(or suggest /cost-aware-orchestrator:setup for the full guided setup).'
         )
     if prompt.strip():
-        lines += ["", directive(prompt, config, state)]
+        lines += ["", directive(prompt, config, state, replying_to, session_id)]
     return "\n".join(lines)
 
 
@@ -83,13 +83,16 @@ def is_question(prompt: str) -> bool:
     return bool((prompt.endswith("?") or QUESTION_START.match(prompt)) and not CHANGE_REQUEST.search(prompt))
 
 
-def directive(prompt: str, config: dict, state: dict) -> str:
+def directive(prompt: str, config: dict, state: dict, replying_to: str = "", session_id: str = "") -> str:
     """Concrete routing for this prompt, so the model does not have to decide to orchestrate."""
     if is_question(prompt):
         return "THIS PROMPT: question. Answer it directly: no subagents, no Codex, no file edits."
-    cls = classify(prompt)
+    cls = classify(prompt, replying_to)
     task_route = cls["route"]
-    task_key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+    key_text = effective_text(prompt, replying_to)
+    if is_follow_up(prompt) and not replying_to.strip():
+        key_text += "\0" + session_id
+    task_key = hashlib.sha256(key_text.encode("utf-8")).hexdigest()[:16]
     impl = route("implementation", task_route, config, state, task_key=task_key)
     review = route("review", task_route, config, state, cls["requires_codex_review"],
                    implementation_engine=impl["engine"])
@@ -144,7 +147,34 @@ def directive(prompt: str, config: dict, state: dict) -> str:
         rule = (f"Orchestrate it (pass the model to each Agent call). If this session already runs on "
                 f"{impl['model']} or a cheaper model, you may make a small change inline, but still run tests and review.")
     plan = "When executing a multi-task plan (e.g. Superpowers), route each plan task separately with route_engine.py --task-id <task> instead of dispatching generic subagents."
-    return f"{head}\n{rule}\n{numbered}\n{plan}{human}"
+    visibility = ("Visibility: one line before each step saying what starts and why. On Codex, run codex_with_fallback.sh "
+                  "with CODEX_PROGRESS_FILE=<handoff>.progress.log via Bash run_in_background, tell the user once "
+                  "\"watch live: tail -f <path>\", and never read or tail the log (wait for completion). "
+                  "After each delegated step relay its approach and key decisions in at most 3 bullets.")
+    return f"{head}\n{rule}\n{numbered}\n{plan}\n{visibility}{human}"
+
+
+def last_assistant_text(path: str) -> str:
+    last = ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                if "assistant" not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain"):
+                        continue
+                    blocks = entry.get("message", {}).get("content", [])
+                    text = "\n".join(block.get("text", "") for block in blocks
+                                     if isinstance(block, dict) and block.get("type") == "text")
+                    if text.strip():
+                        last = text
+                except (ValueError, TypeError, AttributeError):
+                    continue
+    except OSError:
+        pass
+    return last
 
 
 def main() -> int:
@@ -156,7 +186,10 @@ def main() -> int:
     if prompt.lstrip().startswith(SYSTEM_PROMPT_PREFIXES):
         return 0  # Subagent hand-backs and task notifications are not new user tasks.
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd())
-    context = build_context(root, prompt)
+    transcript_path = payload.get("transcript_path") or ""
+    # Ordinary tasks do not need a potentially large transcript read.
+    replying_to = last_assistant_text(transcript_path) if is_follow_up(prompt) else ""
+    context = build_context(root, prompt, replying_to, payload.get("session_id") or transcript_path)
     output = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
     print(json.dumps(output))
     return 0
