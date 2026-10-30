@@ -25,6 +25,48 @@ and quota deliberately:
 No API keys, OAuth tokens or secrets are stored. Network access only happens through
 your local `claude` and `codex` CLIs.
 
+## How it works
+
+On every prompt a local hook classifies the request, reads the Claude and Codex quota
+state, and injects a concrete plan built by `route_engine.py`. The chosen engine then executes that
+plan: implement, test, then review in parallel.
+
+```mermaid
+flowchart TD
+    P[UserPromptSubmit hook<br/>classify_task.py] --> Q{Question?}
+    Q -- yes --> ANS[Answer directly<br/>no agents, no Codex]
+    Q -- no --> T{Tier}
+    T -- trivial --> TRIV[Handle directly<br/>lowest effort, no review]
+    T -- standard / complex / critical --> ST[Read engine state<br/>Claude + Codex quota]
+    ST --> R[route_engine.py<br/>engine + model + effort per tier]
+    R --> NONE{Any engine<br/>available?}
+    NONE -- no --> ASK[Stop and ask the user]
+    NONE -- "yes, both constrained" --> ATOM[One atomic task only<br/>human review required]
+    NONE -- yes --> PRE[complex: scout, architect if unclear<br/>critical: scout + architect required]
+    ATOM --> IMPL
+    PRE --> IMPL{Implementation<br/>engine}
+    IMPL -- Claude --> CI[implementer agent<br/>may re-tier up/down once]
+    IMPL -- Codex --> CX[write_handoff.py, then<br/>codex_with_fallback.sh]
+    CI -. "re-tier (handoff keeps done work;<br/>critical never downgrades)" .-> R
+    CI --> X{"Usage limit (exit 42)?"}
+    CX --> X
+    X -- yes --> FB{Other engine<br/>allowed and has attempts?}
+    FB -- no --> ASK
+    FB -- yes --> LIM[Mark engine limited<br/>hand remaining work over<br/>handoff: Do not redo]
+    LIM --> TEST
+    X -- no --> TEST{Test command<br/>configured?}
+    TEST -- no --> REV
+    TEST -- yes --> OK{Pass?}
+    OK -- no --> FIX[One fix pass, same engine<br/>then other engine / higher tier<br/>then stop and ask]
+    FIX --> OK
+    OK -- yes --> REV
+    subgraph REV [Parallel review]
+        MR[Main review: codex-reviewer or verifier<br/>other engine when both healthy]
+        SR[style-reviewer, haiku<br/>skipped if Claude constrained<br/>or review.split is false]
+    end
+    REV --> DONE[Report result]
+```
+
 ## Requirements
 
 - Claude Code with plugin support. `/smart-task` uses the Workflow tool when your
