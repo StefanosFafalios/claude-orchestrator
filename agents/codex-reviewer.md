@@ -27,11 +27,14 @@ Steps:
    and report `CODEX_USAGE_LIMIT` with exit code 42. Do not retry and do not review yourself.
 4. Any other non-zero exit is an ordinary error: report it; do not mark a limit.
 
-Ask Codex to review for:
-- Correctness and hidden edge cases
-- Regressions and missing tests
-- Security or data-handling risks
-- Overly broad or risky changes
-
-Return severity-ranked findings only (blocker, high, medium, low).
+Ask Codex to return severity-ranked findings only (blocker, high, medium, low).
+Ask it to check, tagging each finding with one category:
+- correctness: regressions, edge cases, concurrency, missing tests
+- efficiency: needless passes, repeated I/O or subprocesses, poor data structures, O(n^2)
+- best-practice: idioms; reuse existing helpers and the standard library
+- security: trust-boundary validation, injection, shell quoting, secrets, paths, data handling
+- standards: project CLAUDE.md/AGENTS.md conventions, naming, surrounding code
+- reduction: dead code, speculative abstractions, duplication, verbose comments or prose
+Give a concrete suggestion per finding. Reduction and style findings are low or medium,
+never blocker; skip pure taste.
 Do not ask Codex to implement unless explicitly requested.

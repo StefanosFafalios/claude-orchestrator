@@ -103,6 +103,8 @@ const SCOUT_SCHEMA = {
     files: { type: 'array', items: { type: 'string' } },
     symbols: { type: 'array', items: { type: 'string' } },
     impact: { type: 'string' },
+    route: { type: 'string', enum: ROUTES },
+    route_reason: { type: 'string' },
   },
 }
 const PLAN_SCHEMA = {
@@ -127,6 +129,8 @@ const IMPL_SCHEMA = {
     remaining_work: { type: 'string', description: 'empty when done' },
     tests_run: { type: 'array', items: { type: 'string' } },
     risks: { type: 'array', items: { type: 'string' } },
+    reroute: { type: 'string', enum: ['up', 'down'] },
+    reroute_reason: { type: 'string' },
     usage_limited: { type: 'boolean', description: 'true only if a usage/quota limit message stopped the work' },
   },
 }
@@ -142,6 +146,7 @@ const FINDINGS_SCHEMA = {
         required: ['severity', 'title'],
         properties: {
           severity: { type: 'string', enum: ['blocker', 'high', 'medium', 'low'] },
+          category: { type: 'string', enum: ['correctness', 'efficiency', 'best-practice', 'security', 'standards', 'reduction'] },
           title: { type: 'string' },
           file: { type: 'string' },
           detail: { type: 'string' },
@@ -162,7 +167,7 @@ if (!classification || !ROUTES.includes(classification.route)) {
   if (r.exit_code !== 0) throw new Error(`classify_task.py exited ${r.exit_code}: ${r.stderr.slice(-500)}`)
   classification = parseJson(r.stdout, 'classify_task.py')
 }
-const ROUTE = classification.route
+let ROUTE = classification.route
 const CODEX_REVIEW_FLAG = classification.requires_codex_review ? ' --requires-codex-review' : ''
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
@@ -195,22 +200,40 @@ async function routeAll(phaseName, implEngine = 'auto') {
 }
 let routing = await routeAll('Route')
 const CONFIG = routing.CONFIG
-const impl = routing.IMPLEMENTATION
+let impl = routing.IMPLEMENTATION
 log(`implementation → ${impl.engine} ${impl.model} ${impl.effort}: ${impl.reason}`)
 
 const fallbackEvents = []
+const rerouteEvents = []
 const handoffs = []
 let requiresHumanReview = Boolean(impl.requires_human_review)
 
-if (impl.engine === 'none') {
+function noEngine(filesChanged = []) {
   return {
     task_id: TASK_ID, route: ROUTE,
     implementation_engine: 'none', implementation_model: '', implementation_effort: '',
-    review_engine: 'none', review_findings: [], files_changed: [], tests: { skipped: true },
-    fallback_events: [], requires_human_review: true,
+    review_engine: 'none', review_findings: [], files_changed: filesChanged, tests: { skipped: true },
+    fallback_events: fallbackEvents, reroute_events: rerouteEvents, requires_human_review: true,
     summary: `No engine available: ${impl.reason}. Wait for a quota reset or approve manual work.`,
   }
 }
+
+async function reroute(source, to, reason) {
+  if (rerouteEvents.length || !ROUTES.includes(to) || to === ROUTE || (ROUTE === 'critical' && to !== 'critical')) {
+    log(`reroute ignored: ${source} ${ROUTE} → ${to} (${reason || 'no reason'})`)
+    return false
+  }
+  const from = ROUTE
+  ROUTE = to
+  routing = await routeAll(source === 'scout' ? 'Scout' : 'Implement')
+  impl = routing.IMPLEMENTATION
+  requiresHumanReview ||= Boolean(impl.requires_human_review)
+  rerouteEvents.push({ source, from, to, reason: reason || '' })
+  log(`reroute: ${source} ${from} → ${to} (${reason || 'no reason'})`)
+  return true
+}
+
+if (impl.engine === 'none') return noEngine()
 
 // ---------------------------------------------------------------------------
 // Engine runners. Each returns {limited, ok, summary, files_changed, completed_work, remaining_work}.
@@ -254,6 +277,44 @@ async function writeHandoff(source, target, completed, remaining, files, phaseNa
 }
 
 let scoutFiles = []
+let context = ''
+let planned = false
+
+// Architect plan for complex or critical work; appends to `context`, runs at most once.
+async function plan() {
+  if (planned || (ROUTE !== 'complex' && ROUTE !== 'critical')) return
+  planned = true
+  phase('Plan')
+  const ar = routing.ARCHITECTURE
+  if (ar.engine !== 'claude') return log(`plan skipped: ${ar.reason}`)
+  const p = await agent(`Task (${ROUTE}): ${TASK}${context}\n\nAssess and return a minimal implementation plan.`, {
+    agentType: `${PLUGIN}:architect`, label: 'plan', phase: 'Plan', schema: PLAN_SCHEMA, model: ar.model, effort: ar.effort,
+  })
+  if (p) {
+    context += `\n\nArchitect plan:\n${p.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\nRisks: ${p.risks.join('; ')}\nTest strategy: ${p.test_strategy}`
+    if (p.rollback) context += `\nRollback: ${p.rollback}`
+  }
+}
+
+// A resumed handoff already carries its context: no scout or plan.
+if (ROUTE !== 'trivial' && !ARGS.handoff) {
+  phase('Scout')
+  const sr = routing.SCOUT
+  if (sr.engine === 'claude') {
+    const scout = await agent(`Task (${ROUTE}): ${TASK}\n\nFind the files and symbols this task touches and summarize the impact.`, {
+      agentType: `${PLUGIN}:scout`, label: 'scout', phase: 'Scout', schema: SCOUT_SCHEMA, model: sr.model, effort: sr.effort,
+    })
+    if (scout) {
+      scoutFiles = scout.files || []
+      context += `\n\nScout findings:\nFiles: ${scoutFiles.join(', ')}\nSymbols: ${(scout.symbols || []).join(', ')}\nImpact: ${scout.impact}`
+      if (scout.route) await reroute('scout', scout.route, scout.route_reason)
+    }
+  } else {
+    log(`scout skipped: ${sr.reason}`)
+  }
+}
+if (impl.engine === 'none') return noEngine()
+if (!ARGS.handoff) await plan()
 
 async function runClaude(tier, handoffPath) {
   let brief
@@ -261,41 +322,10 @@ async function runClaude(tier, handoffPath) {
     brief = `Read the orchestration handoff at ${handoffPath}. Complete only its "Remaining work". ` +
       `Do not redo anything listed under "Do not redo". Follow its constraints and output contract.`
   } else {
-    let context = ''
-    if (ROUTE !== 'trivial') {
-      phase('Scout')
-      const sr = routing.SCOUT
-      if (sr.engine === 'claude') {
-        const scout = await agent(`Task: ${TASK}\n\nFind the files and symbols this task touches and summarize the impact.`, {
-          agentType: `${PLUGIN}:scout`, label: 'scout', phase: 'Scout', schema: SCOUT_SCHEMA, model: sr.model, effort: sr.effort,
-        })
-        if (scout) {
-          scoutFiles = scout.files || []
-          context += `\n\nScout findings:\nFiles: ${scoutFiles.join(', ')}\nSymbols: ${(scout.symbols || []).join(', ')}\nImpact: ${scout.impact}`
-        }
-      } else {
-        log(`scout skipped: ${sr.reason}`)
-      }
-    }
-    if (ROUTE === 'complex' || ROUTE === 'critical') {
-      phase('Plan')
-      const ar = routing.ARCHITECTURE
-      if (ar.engine === 'claude') {
-        const plan = await agent(`Task (${ROUTE}): ${TASK}${context}\n\nAssess and return a minimal implementation plan.`, {
-          agentType: `${PLUGIN}:architect`, label: 'plan', phase: 'Plan', schema: PLAN_SCHEMA, model: ar.model, effort: ar.effort,
-        })
-        if (plan) {
-          context += `\n\nArchitect plan:\n${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\nRisks: ${plan.risks.join('; ')}\nTest strategy: ${plan.test_strategy}`
-          if (plan.rollback) context += `\nRollback: ${plan.rollback}`
-        }
-      } else {
-        log(`plan skipped: ${ar.reason}`)
-      }
-    }
     const scope = impl.scope === 'single_atomic_task'
       ? '\n\nQuota is constrained: complete only the first atomic step and list everything else under remaining_work.'
       : ''
-    brief = `Task: ${TASK}${context}${scope}`
+    brief = `Task (${ROUTE}): ${TASK}${context}${scope}`
   }
   phase('Implement')
   const r = await agent(brief, {
@@ -348,15 +378,28 @@ let result = null
 const enginesUsed = new Set()
 
 while (true) {
-  tried.add(engine)
   enginesUsed.add(engine)
   if (engine === 'codex' && !handoffPath) {
-    handoffPath = await writeHandoff('claude', 'codex', '', TASK, scoutFiles, 'Implement')
+    handoffPath = await writeHandoff('claude', 'codex', '', `${TASK}${context}`, scoutFiles, 'Implement')
   }
   const out = engine === 'claude' ? await runClaude(tier, handoffPath) : await runCodex(tier, handoffPath)
+  if (!out.limited && engine === 'claude' && !out.ok && out.reroute) {
+    const index = ROUTES.indexOf(ROUTE) + (out.reroute === 'up' ? 1 : out.reroute === 'down' ? -1 : 99)
+    if (await reroute('implementer', ROUTES[index], out.reroute_reason)) {
+      if (impl.engine === 'none') return noEngine(out.files_changed || [])
+      const before = context
+      await plan()  // an upgrade into complex/critical gets its plan now
+      handoffPath = await writeHandoff(engine, impl.engine, out.completed_work || '', `${out.remaining_work || TASK}${context.slice(before.length)}`,
+        out.files_changed && out.files_changed.length ? out.files_changed : scoutFiles, 'Implement')
+      engine = impl.engine
+      tier = { model: impl.model, effort: impl.effort }
+      continue
+    }
+  }
   if (!out.limited) { result = out; break }
 
   phase('Fallback')
+  tried.add(engine)
   await markLimit(engine, 'Fallback')
   const other = engine === 'claude' ? 'codex' : 'claude'
   if (tried.has(other) || !fallbackAllowed(engine, other)) {
@@ -493,6 +536,7 @@ return {
   files_changed: result.files_changed || [],
   tests,
   fallback_events: fallbackEvents,
+  reroute_events: rerouteEvents,
   fix_events: fixEvents,
   requires_human_review: requiresHumanReview,
   summary: result.summary,

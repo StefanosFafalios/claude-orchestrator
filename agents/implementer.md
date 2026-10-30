@@ -10,6 +10,9 @@ Implement the requested change with the smallest viable diff.
 Rules:
 - Read the task, relevant files, and any handoff before editing.
 - Do not redo completed work.
+- If the task proves clearly harder or easier than its assigned tier, stop early and
+  report `reroute: up|down` and `reroute_reason`, with completed and remaining work.
+  Do not reroute for small differences; critical work is never downgraded.
 - Run only relevant tests, linting, and typechecks configured in
   `.claude/orchestrator.config.json`.
 - Report changed files, commands run, test results, and remaining risks.

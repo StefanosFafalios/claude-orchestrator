@@ -93,13 +93,14 @@ def directive(prompt: str, config: dict, state: dict) -> str:
     if task_route in ("complex", "critical"):
         scout = route("scout", task_route, config, state)
         if scout["engine"] == "claude":
-            steps.append(f"scout with {_agent('scout', scout)}")
+            steps.append(f"scout with {_agent('scout', scout)}; if the scout reports a different route, "
+                         "rerun route_engine.py once with that --task-route (never downgrade critical)")
         arch = route("architecture", task_route, config, state)
         if arch["engine"] == "claude":
             optional = " only if the root cause or design is unclear" if task_route == "complex" else ""
             steps.append(f"plan with {_agent('architect', arch)}{optional}")
     if impl["engine"] == "claude":
-        steps.append(f"implement with {_agent('implementer', impl)}")
+        steps.append(f"implement with {_agent('implementer', impl)}; it may report reroute up/down once")
     else:
         steps.append(f"implement on Codex ({impl['reason']}): write a handoff with write_handoff.py, then run "
                      f"CODEX_SANDBOX=workspace-write CODEX_MODEL={impl['model']} CODEX_EFFORT={impl['effort']} "

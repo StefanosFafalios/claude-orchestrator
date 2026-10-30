@@ -19,7 +19,7 @@ async function agent(prompt, opts = {}) {
     calls.push({ label: opts.label, kind: 'bash', exit_code: r.status })
     return { exit_code: r.status, stdout: r.stdout, stderr: r.stderr }
   }
-  calls.push({ label: opts.label, kind: 'agent', agentType: opts.agentType, model: opts.model, effort: opts.effort, prompt })
+  calls.push({ label: opts.label, kind: 'agent', agentType: opts.agentType, model: opts.model, effort: opts.effort, prompt, schema: opts.schema })
   const scripted = scenario.agents[opts.label]
   if (Array.isArray(scripted)) return scripted.shift() ?? null
   return scripted ?? null

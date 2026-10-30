@@ -129,8 +129,12 @@ line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of task
 one subscription gets closer to its limit, more work goes to the other. The choice is a
 deterministic hash of the task, so the same task always routes the same way.
 
+**Re-tiering.** The keyword route is a free first guess; the Haiku scout or the
+implementer may correct it once per task (critical is never downgraded).
+
 **Cross-engine review.** Review always runs on the engine that did not implement, when
 it is healthy: Claude work is reviewed by Codex, and Codex work by Claude.
+Reviews also cover efficiency, best practices, security, coding standards, and code/text reduction.
 
 **Test gate.** If the project's tests fail, the same engine gets one fix pass with only
 the failing output. If they still fail, the other engine (or one Claude tier up) gets

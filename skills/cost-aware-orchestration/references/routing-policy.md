@@ -23,6 +23,15 @@ An engine disabled in `engines` is treated as unavailable. "Constrained" means
 | complex | multi-file investigation, debugging, architecture, unknown root cause | sonnet / high, escalate to opus / high only if needed |
 | critical | production, security, migrations, auth/payment changes, irreversible or high blast-radius work | opus / high for planning and review |
 
+## Re-tiering
+
+The keyword classifier is the free first guess. Once per task, the scout may propose
+any route or the implementer may propose one step up or down for a clear mismatch.
+Never downgrade critical. Rerun `route_engine.py` for the new route; an upgrade into
+complex or critical gets an architect plan; once implementation has started, hand off
+completed and remaining work. A re-tier is not a quota fallback and does not use up the
+other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`.
+
 ## Codex tiers
 
 Each route has a Codex equivalent in `codex.tiers` (model, effort, `implement` switch).

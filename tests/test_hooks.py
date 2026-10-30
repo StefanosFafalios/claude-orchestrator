@@ -112,6 +112,7 @@ def test_directive_for_critical_prompt_plans_and_reviews_on_codex(project):
     text = context(project, "Refactor the authentication service and add tests")
     assert "route=critical" in text
     assert "scout" in text and "architect" in text and "codex-reviewer" in text
+    assert "if the scout reports a different route, rerun route_engine.py once" in text
 
 
 def test_directive_routes_to_codex_when_claude_limited(project):

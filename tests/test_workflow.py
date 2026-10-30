@@ -75,6 +75,11 @@ def test_critical_task_plans_and_reviews_on_codex(repo):
     assert result["route"] == "critical" and result["implementation_model"] == "opus"
     assert result["review_engine"] == "codex"
     assert result["review_findings"][0]["title"] == "missing test"
+    review = next(c for c in out["calls"] if c["label"] == "review:codex")
+    finding = review["schema"]["properties"]["findings"]["items"]
+    assert "category" not in finding["required"]
+    assert finding["properties"]["category"] == {
+        "type": "string", "enum": ["correctness", "efficiency", "best-practice", "security", "standards", "reduction"]}
     assert "plan" in labels(out["calls"])
 
 
@@ -169,3 +174,77 @@ def test_failing_tests_get_one_fix_pass(repo, write_config):
     fix_prompt = [c for c in out["calls"] if c["label"] == "implement:claude"][1]["prompt"]
     assert "handoffs/" in fix_prompt
     assert result["requires_human_review"] is False
+
+
+def test_scout_upgrade_runs_plan_at_new_tier(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "broad", "route": "complex", "route_reason": "multiple modules"},
+        "plan": {"assessment": "a", "steps": ["s"], "risks": [], "test_strategy": "t"},
+        "implement:claude": DONE, "review:codex": NO_FINDINGS}})
+    assert out["result"]["route"] == "complex"
+    assert out["result"]["implementation_effort"] == "high"
+    assert "plan" in labels(out["calls"])
+    assert out["result"]["reroute_events"] == [
+        {"source": "scout", "from": "standard", "to": "complex", "reason": "multiple modules"}]
+
+
+def test_scout_cannot_downgrade_critical(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    out = run(repo, {"task": "Refactor the authentication service and add tests", "agents": {
+        "scout": {"files": [], "impact": "small", "route": "standard", "route_reason": "small"},
+        "plan": {"assessment": "a", "steps": ["s"], "risks": [], "test_strategy": "t"},
+        "implement:claude": DONE, "review:codex": NO_FINDINGS}})
+    assert out["result"]["route"] == "critical"
+    assert out["result"]["reroute_events"] == []
+
+
+def test_implementer_reroutes_with_handoff(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    partial = dict(DONE, status="partial", completed_work="investigated", remaining_work="finish change",
+                   reroute="up", reroute_reason="multiple modules")
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": [], "impact": "x"}, "implement:claude": [partial, DONE], "review:codex": NO_FINDINGS,
+        "plan": {"assessment": "a", "steps": ["split parser"], "risks": [], "test_strategy": "t"}}})
+    assert labels(out["calls"]).index("plan") > labels(out["calls"]).index("implement:claude"), "upgrade gets a plan"
+    calls = [c for c in out["calls"] if c["label"] == "implement:claude"]
+    assert len(calls) == 2 and calls[1]["effort"] == "high" and "handoffs/" in calls[1]["prompt"]
+    handoff = (repo / out["result"]["handoffs"][0]).read_text()
+    assert "investigated" in handoff and "finish change" in handoff and "split parser" in handoff
+    assert out["result"]["reroute_events"] == [
+        {"source": "implementer", "from": "standard", "to": "complex", "reason": "multiple modules"}]
+    assert out["result"]["fallback_events"] == []
+
+
+def test_only_one_reroute(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    partial = dict(DONE, status="partial", remaining_work="finish", reroute="up", reroute_reason="harder")
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": [], "impact": "broad", "route": "complex", "route_reason": "broad"},
+        "plan": {"assessment": "a", "steps": ["s"], "risks": [], "test_strategy": "t"},
+        "implement:claude": partial, "review:codex": NO_FINDINGS}})
+    assert out["result"]["route"] == "complex"
+    assert len(out["result"]["reroute_events"]) == 1
+    assert labels(out["calls"]).count("implement:claude") == 1
+
+
+def test_reroute_does_not_consume_fallback_attempt(repo, write_config, monkeypatch):
+    write_config({"balance": {"mode": "off"}})
+    monkeypatch.setenv("FAKE_CODEX", "limit")
+    partial = dict(DONE, status="partial", remaining_work="finish", reroute="down", reroute_reason="simple")
+    # A one-step downgrade to trivial still routes to Claude; its later limit can use Codex.
+    limited = dict(DONE, status="partial", remaining_work="finish", usage_limited=True)
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": [], "impact": "x"}, "implement:claude": [partial, limited], "review:claude": NO_FINDINGS}})
+    assert out["result"]["reroute_events"][0]["to"] == "trivial"
+    assert out["result"]["fallback_events"][0]["to"] == "codex"
+
+
+def test_resumed_handoff_skips_scout_and_plan(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    handoff = repo / ".claude" / "orchestrator" / "handoffs" / "t.md"
+    handoff.parent.mkdir(parents=True)
+    handoff.write_text("## Remaining work\nfinish")
+    out = run(repo, {"task": "debug the flaky parser", "args": {"handoff": ".claude/orchestrator/handoffs/t.md"},
+                     "agents": {"implement:claude": DONE, "review:codex": NO_FINDINGS}})
+    assert "scout" not in labels(out["calls"]) and "plan" not in labels(out["calls"])

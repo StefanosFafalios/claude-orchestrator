@@ -41,21 +41,24 @@ Workflow:
 6. Use the `scout` agent for repository exploration.
 7. Use the `implementer` agent for standard implementation.
 8. Use the `architect` agent before implementation for complex or critical work.
-9. Run the configured test command. On failure, give the same engine one fix pass with
+9. Re-tier at most once per task, as in `references/routing-policy.md#re-tiering`: rerun
+   `route_engine.py` with the scout's route or one step up/down from the implementer
+   (never down from critical), plan if it became complex/critical, and hand off.
+10. Run the configured test command. On failure, give the same engine one fix pass with
    only the failing output (via a handoff); if it still fails, hand it once to the other
    engine (or one Claude tier up), then stop and ask.
-10. For review, run `route_engine.py --role review --implementation-engine <engine>`: it
+11. For review, run `route_engine.py --role review --implementation-engine <engine>`: it
    puts the review on the other engine when both are healthy (`verifier` on Claude,
    `codex-reviewer` on Codex).
-11. If an engine exits with code 42, mark it limited
+12. If an engine exits with code 42, mark it limited
     (`engine_state.py mark-limit --engine <engine> --message "<first line>"`), create a
     handoff with `write_handoff.py` listing completed and remaining work, and delegate
     only the remaining work to the other engine (`codex_with_fallback.sh` or
     `claude_with_fallback.sh` with the handoff file). Retry once per engine per task.
-12. Never delegate authentication, permission, network, or ordinary tool errors as quota
+13. Never delegate authentication, permission, network, or ordinary tool errors as quota
     failures. Exit code 1 is an ordinary failure: report it.
-13. If both engines are constrained, stop fan-out and require human approval.
-14. After completion, run `engine_state.py record-result` for each engine used and save
+14. If both engines are constrained, stop fan-out and require human approval.
+15. After completion, run `engine_state.py record-result` for each engine used and save
     the final summary to `.claude/orchestrator/results/<task-id>.md`.
 
 All delegated work follows `references/coding-standards.md`. The full routing table is
