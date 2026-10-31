@@ -144,6 +144,7 @@ Add the runtime state to the project's `.gitignore`:
 /cost-aware-orchestrator:setup
 /cost-aware-orchestrator:smart-task Implement retry handling for webhook failures and update tests
 /cost-aware-orchestrator:engine-status
+/cost-aware-orchestrator:session-usage
 /cost-aware-orchestrator:reset-engine-state
 ```
 
