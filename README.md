@@ -95,6 +95,13 @@ It checks Python and the Codex CLI, turns on usage tracking, creates the project
 (detecting your test, lint and typecheck commands) and offers the `.gitignore` entries.
 It asks before every change.
 
+Setup offers to move instructions into one common file and make both AGENTS.md and
+CLAUDE.md point to it. The root defaults to `docs/AI_CONTEXT.md` (override with
+`--common-file PATH`); nested instruction files use a local `AI_CONTEXT.md`. Setup
+asks before applying changes and offers to review merged instructions for duplicates.
+
+Setup can also show live Codex activity in the Claude Code status line.
+
 **Codex** is optional. If the `codex` CLI is installed and logged in (`codex login`), the
 plugin uses it with no further configuration. Without it, set
 `"engines": {"codex": false}` and everything stays on Claude.

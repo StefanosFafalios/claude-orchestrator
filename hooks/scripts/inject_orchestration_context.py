@@ -147,10 +147,9 @@ def directive(prompt: str, config: dict, state: dict, replying_to: str = "", ses
         rule = (f"Orchestrate it (pass the model to each Agent call). If this session already runs on "
                 f"{impl['model']} or a cheaper model, you may make a small change inline, but still run tests and review.")
     plan = "When executing a multi-task plan (e.g. Superpowers), route each plan task separately with route_engine.py --task-id <task> instead of dispatching generic subagents."
-    visibility = ("Visibility: one line before each step saying what starts and why. On Codex, run codex_with_fallback.sh "
-                  "with CODEX_PROGRESS_FILE=<handoff>.progress.log via Bash run_in_background, tell the user once "
-                  "\"watch live: tail -f <path>\", and never read or tail the log (wait for completion). "
-                  "After each delegated step relay its approach and key decisions in at most 3 bullets.")
+    visibility = ("Visibility: one line before each step saying what starts and why. Run Codex via Bash "
+                  "run_in_background and wait for the completion notification without reading output early. "
+                  "Relay approach and key decisions in at most 3 bullets.")
     return f"{head}\n{rule}\n{numbered}\n{plan}\n{visibility}{human}"
 
 

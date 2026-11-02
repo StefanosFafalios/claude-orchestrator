@@ -44,6 +44,7 @@
 - Do not broaden scope.
 - Do not store secrets or credentials.
 - Follow the project's existing code style.
+- Codex must read the project common instruction file (AGENTS.md points to it) and follow applicable nested AGENTS.md files before working.
 - Do not commit, push, or open pull requests unless the objective says to.
 - Never add agent attribution (`Co-Authored-By` trailers, "Generated with" lines) to commits or PRs.
 

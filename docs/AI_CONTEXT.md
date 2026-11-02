@@ -96,3 +96,12 @@ These rules apply to every agent.
 
 `skills/cost-aware-orchestration/references/coding-standards.md` is the subset of these
 rules the plugin hands to every engine in consuming projects. Keep the two consistent.
+
+## Instruction synchroniser
+
+`scripts/sync_instructions.py` plans or applies a shared instruction file for each
+scope. Root instructions default to `docs/AI_CONTEXT.md`; nested scopes use a local
+`AI_CONTEXT.md`. Claude and Codex instruction files become pointers to that common
+file. A private journal and temporary backups allow the next `--apply` to recover an
+interrupted run; successful runs remove them. Run without `--apply` to review the
+plan and see whether recovery is pending.

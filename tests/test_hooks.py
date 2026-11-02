@@ -112,8 +112,9 @@ def test_directive_for_standard_prompt(project, write_config):
 def test_directive_visibility_only_for_non_trivial_routes(project, write_config):
     write_config({"balance": {"mode": "off"}})
     text = context(project, "Add a subtract function to calc.py and add tests for it.")
-    assert "Visibility:" in text and "CODEX_PROGRESS_FILE=<handoff>.progress.log" in text
-    assert "watch live: tail -f" in text and "Monitor" not in text
+    assert "one line before each step saying what starts and why" in text
+    assert "run_in_background and wait for the completion notification without reading output early" in text
+    assert "Relay approach and key decisions in at most 3 bullets" in text
     assert "Visibility:" not in context(project, "fix typo in README")
     assert "Visibility:" not in context(project, "How does the router pick an engine?")
 
