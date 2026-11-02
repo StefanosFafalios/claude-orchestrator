@@ -105,3 +105,17 @@ scope. Root instructions default to `docs/AI_CONTEXT.md`; nested scopes use a lo
 file. A private journal and temporary backups allow the next `--apply` to recover an
 interrupted run; successful runs remove them. Run without `--apply` to review the
 plan and see whether recovery is pending.
+
+
+## Claude Code-specific behavior
+
+This repository *is* a Claude Code plugin. To try local changes, run
+`claude --plugin-dir .` from a scratch project rather than installing from the
+marketplace.
+
+## Codex-specific behavior
+
+Use Codex tools for repository work. Claude Code skills, hooks, agents and workflows
+in this repository are product code you edit; Codex does not need Claude Code's skill
+discovery to work on them. When a handoff from `.claude/orchestrator/handoffs/` is
+your input, do only its "Remaining work" and nothing listed under "Do not redo".
