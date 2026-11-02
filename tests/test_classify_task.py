@@ -122,6 +122,37 @@ def test_follow_up_uses_last_paragraph():
     assert classify("commit and push the changes after fixing the issue now please today")["route"] == "standard"
 
 
+@pytest.mark.parametrize("task, offer", [
+    ("ok go ahead and commit", "You can restore it with `git checkout -- CLAUDE.md`. Should I commit?"),
+    ("yes", "Should I commit it all as 0.8.0, push and update the installed plugin? "
+     "You would then run /cost-aware-orchestrator:setup once and restart."),
+    ("nah do it now", "Should I commit and push?"),
+    ("yes", "Use `rm -rf build` later. Should I commit?"),
+    ("yes", "```sh\nrm -rf build\n```\nShould I commit?"),
+])
+def test_git_follow_up_ignores_unrelated_code(task, offer):
+    assert is_follow_up(task)
+    assert classify(task, offer)["route"] == "trivial"
+
+
+@pytest.mark.parametrize("task", ["no", "nah", "dont", "don't"])
+def test_refusal_does_not_execute_git_offer(task):
+    assert classify(task, "Should I commit and push?")["route"] == "standard"
+
+
+def test_follow_up_offer_keeps_real_work_and_critical_signals():
+    assert classify("yes", "Should I force push?")["route"] == "critical"
+    assert classify("yes", "Use `rm -rf build` later. Should I delete the old cache?")["route"] != "critical"
+    assert classify("yes", "Should I fix the bug and commit?")["route"] == "standard"
+    assert classify("yes", "Should I delete the old cache and commit?")["route"] == "standard"
+    assert classify("ok go ahead and commit", "Should I force push?")["route"] == "trivial"
+
+
+@pytest.mark.parametrize("task", ["go for it", "please do", "yes please", "ok do it"])
+def test_more_follow_up_phrases(task):
+    assert is_follow_up(task)
+
+
 @pytest.mark.parametrize("suffix", [
     "| Command | Status |\n| --- | --- |\n| rm -rf db | quoted |",
     "- First item\n- Second item",

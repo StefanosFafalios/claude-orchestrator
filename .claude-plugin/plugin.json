@@ -1,6 +1,6 @@
 {
   "name": "cost-aware-orchestrator",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Token- and quota-aware orchestration for Claude Code with tiered Claude models, optional Codex fallback, and cross-engine review.",
   "author": {
     "name": "Stefanos Fafalios"
