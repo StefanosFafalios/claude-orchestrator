@@ -5,7 +5,7 @@ import sys
 import pytest
 from conftest import ROOT
 
-from classify_task import classify, is_follow_up
+from classify_task import classify
 
 
 @pytest.mark.parametrize("task, route", [
@@ -83,14 +83,6 @@ def test_unknown_task_defaults_to_standard():
 
 
 @pytest.mark.parametrize("task", [
-    "yes", "ok", "yes, ignore it and push", "commit it", "lgtm",
-])
-def test_short_follow_ups_without_context_are_standard(task):
-    assert is_follow_up(task)
-    assert classify(task)["route"] == "standard"
-
-
-@pytest.mark.parametrize("task", [
     "make the sidebar collapsible", "speed up startup", "delete the old cache",
     "make the sidebar collapsible and commit", "yes, fix the bug in parser.py",
 ])
@@ -105,61 +97,6 @@ def test_other_short_tasks_are_standard(task):
 ])
 def test_critical_signals_override_follow_ups(task):
     assert classify(task)["route"] == "critical"
-
-
-def test_short_follow_up_word_limit():
-    assert is_follow_up("yes one two three four five six seven")
-    assert not is_follow_up("yes one two three four five six seven eight")
-
-
-def test_follow_up_uses_last_paragraph():
-    result = classify("yes", "Earlier: implement a feature.\n\nShould I bump the version, then commit and push?")
-    assert result["route"] == "trivial"
-    assert result["reason"].startswith("follow-up to: ")
-    assert classify("yes", "Want me to implement the retry queue across services?")["route"] == "complex"
-    assert classify("yes")["reason"] == "follow-up without context; defaulting to standard"
-    assert classify("yes, force push", "Should I commit?")["route"] == "critical"
-    assert classify("commit and push the changes after fixing the issue now please today")["route"] == "standard"
-
-
-@pytest.mark.parametrize("task, offer", [
-    ("ok go ahead and commit", "You can restore it with `git checkout -- CLAUDE.md`. Should I commit?"),
-    ("yes", "Should I commit it all as 0.8.0, push and update the installed plugin? "
-     "You would then run /cost-aware-orchestrator:setup once and restart."),
-    ("nah do it now", "Should I commit and push?"),
-    ("yes", "Use `rm -rf build` later. Should I commit?"),
-    ("yes", "```sh\nrm -rf build\n```\nShould I commit?"),
-])
-def test_git_follow_up_ignores_unrelated_code(task, offer):
-    assert is_follow_up(task)
-    assert classify(task, offer)["route"] == "trivial"
-
-
-@pytest.mark.parametrize("task", ["no", "nah", "dont", "don't"])
-def test_refusal_does_not_execute_git_offer(task):
-    assert classify(task, "Should I commit and push?")["route"] == "standard"
-
-
-def test_follow_up_offer_keeps_real_work_and_critical_signals():
-    assert classify("yes", "Should I force push?")["route"] == "critical"
-    assert classify("yes", "Use `rm -rf build` later. Should I delete the old cache?")["route"] != "critical"
-    assert classify("yes", "Should I fix the bug and commit?")["route"] == "standard"
-    assert classify("yes", "Should I delete the old cache and commit?")["route"] == "standard"
-    assert classify("ok go ahead and commit", "Should I force push?")["route"] == "trivial"
-
-
-@pytest.mark.parametrize("task", ["go for it", "please do", "yes please", "ok do it"])
-def test_more_follow_up_phrases(task):
-    assert is_follow_up(task)
-
-
-@pytest.mark.parametrize("suffix", [
-    "| Command | Status |\n| --- | --- |\n| rm -rf db | quoted |",
-    "- First item\n- Second item",
-])
-def test_follow_up_uses_offer_before_table_or_list(suffix):
-    reply = "Want me to implement the retry queue across services?\n\n" + suffix
-    assert classify("yes", reply)["route"] == "complex"
 
 
 def test_commit_ordering_is_not_a_git_action():
@@ -180,11 +117,6 @@ def test_cli_reads_stdin_and_task_file(tmp_path):
     task_file.write_text("rotate production credentials")
     out = subprocess.run([sys.executable, script, "--task-file", str(task_file)], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout)["route"] == "critical"
-    reply_file = tmp_path / "reply.txt"
-    reply_file.write_text("Should I commit and push?")
-    out = subprocess.run([sys.executable, script, "--replying-to-file", str(reply_file)],
-                         input="yes", capture_output=True, text=True, check=True)
-    assert json.loads(out.stdout)["route"] == "trivial"
 
 
 def test_llm_tokens_are_not_auth():

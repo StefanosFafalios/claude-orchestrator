@@ -41,6 +41,9 @@ sources (the autouse `usage_files` fixture) and never read the real `~/.claude` 
 - Workflow scripts are plain JavaScript with no filesystem, process, `import()`,
   `Date.now()` or `Math.random()`. `smart-task.js` runs commands through a minimal
   Haiku `bash()` agent and receives `timestamp` and `plugin_root` via `args`.
+- The prompt hook supplies per-tier routes and a keyword safety floor; the main model
+  classifies using the rubric and full conversation. The floor checks only literal prompt
+  text. The dispatch guard no longer checks architect tier; the rows guide architect use.
 - Hooks must finish well under their 5 s timeout, never call `claude`, `codex` or the
   network, and degrade to a notice instead of failing the prompt.
 - `additionalContext` must be nested in `hookSpecificOutput`. The dispatch guard emits

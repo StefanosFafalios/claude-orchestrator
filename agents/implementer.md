@@ -12,7 +12,8 @@ Rules:
 - Do not redo completed work.
 - If the task proves clearly harder or easier than its assigned tier, stop early and
   report `reroute: up|down` and `reroute_reason`, with completed and remaining work.
-  Do not reroute for small differences; critical work is never downgraded.
+  The main model switches rows and hands off finished work. Do not reroute for small
+  differences, below the safety floor, or down from critical.
 - Run only relevant tests, linting, and typechecks configured in
   `.claude/orchestrator.config.json`.
 - Report changed files, commands run, test results, and remaining risks.

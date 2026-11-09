@@ -26,13 +26,13 @@ Workflow:
    Only on yes, copy `${CLAUDE_PLUGIN_ROOT}/templates/orchestrator.config.json` there,
    leave test/lint/typecheck empty until detected or configured, and touch nothing
    outside `.claude/`. On no, continue with plugin defaults.
-2. Classify the task (write the task text to a file under `.claude/orchestrator/runs/`):
-   python3 "<scripts>/classify_task.py" --task-file <task-file>
+2. Classify using the full conversation and the hook rubric; the hook supplies per-tier
+   routes and a keyword safety floor. Never choose below the floor.
 3. Check engine state:
    python3 "<scripts>/engine_state.py" status
 4. Choose engine, model, and effort:
    python3 "<scripts>/route_engine.py" --role implementation --task-route <route> --task-id <task-id>
-   (add `--requires-codex-review` when the classifier set it). The task id enables the
+   (add `--requires-codex-review` for sensitive investigations). The task id enables the
    adaptive split: healthy engines share standard and complex work in proportion to their
    headroom, so `engine: codex` is a normal outcome, not only a fallback. Delegate it.
    Any script exiting 2 means invalid configuration: report the error and stop.
@@ -40,7 +40,7 @@ Workflow:
    directly, no subagents, no review fan-out.
 6. Use the `scout` agent for repository exploration.
 7. Use the `implementer` agent for standard implementation.
-8. Use the `architect` agent before implementation for complex or critical work.
+8. Use the `architect` agent for critical work, and for complex work if the design or root cause is unclear.
 9. When executing a written plan, including Superpowers `executing-plans` or
    `subagent-driven-development`, treat each plan task as its own task: classify and
    route it with `route_engine.py --task-id <plan-task-id>`, implement with the
@@ -50,7 +50,7 @@ Workflow:
    brainstorming and plan writing stay in the session.
 10. Re-tier at most once per task, as in `references/routing-policy.md#re-tiering`: rerun
    `route_engine.py` with the scout's route or one step up/down from the implementer
-   (never down from critical), plan if it became complex/critical, and hand off.
+   (never below the safety floor or down from critical), plan if it became complex/critical, and hand off.
 11. Run the configured test command. On failure, give the same engine one fix pass with
    only the failing output (via a handoff); if it still fails, hand it once to the other
    engine (or one Claude tier up), then stop and ask.

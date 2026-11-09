@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from classify_task import classify, effective_text, is_follow_up  # noqa: E402
+from classify_task import classify  # noqa: E402
 from engine_state import (  # noqa: E402
     PLUGIN_ROOT,
     ConfigError,
@@ -34,21 +34,13 @@ CHANGE_REQUEST = re.compile(r"\b(?:add|implement|fix|change|create|update|refact
 
 POLICY = """ORCHESTRATION POLICY ACTIVE
 
-Before nontrivial work:
-1. Classify the task as trivial, standard, complex, or critical.
-2. Check Claude and Codex quota state.
-3. Route implementation and review using scripts/route_engine.py.
-4. Use the lowest sufficient Claude model and effort.
-5. Prefer Codex for independent review when both engines are healthy.
-6. If an engine returns exit code 42, mark it limited and hand off only remaining work.
-7. If both engines are constrained, avoid fan-out and require human approval.
-
-Do not run the full workflow for trivial conversational requests."""
+If an engine returns exit code 42, mark it limited and hand off only remaining work.
+If both engines are constrained, avoid fan-out and require human approval."""
 
 DISABLED = "ORCHESTRATION POLICY DISABLED"
 
 
-def build_context(root: Path, prompt: str = "", replying_to: str = "", session_id: str = "") -> str:
+def build_context(root: Path, prompt: str = "", session_id: str = "") -> str:
     try:
         config = load_config(root)
     except ConfigError as exc:
@@ -70,12 +62,8 @@ def build_context(root: Path, prompt: str = "", replying_to: str = "", session_i
             '(or suggest /cost-aware-orchestrator:setup for the full guided setup).'
         )
     if prompt.strip():
-        lines += ["", directive(prompt, config, state, replying_to, session_id)]
+        lines += ["", directive(prompt, config, state, session_id)]
     return "\n".join(lines)
-
-
-def _agent(name: str, choice: dict) -> str:
-    return f"the `{PLUGIN}:{name}` agent (model {choice['model']}, effort {choice['effort']})"
 
 
 def is_question(prompt: str) -> bool:
@@ -83,97 +71,65 @@ def is_question(prompt: str) -> bool:
     return bool((prompt.endswith("?") or QUESTION_START.match(prompt)) and not CHANGE_REQUEST.search(prompt))
 
 
-def directive(prompt: str, config: dict, state: dict, replying_to: str = "", session_id: str = "") -> str:
-    """Concrete routing for this prompt, so the model does not have to decide to orchestrate."""
+def steps_for(tier: str, config: dict, state: dict, task_key: str, requires_codex_review: bool) -> str:
+    """Build a compact row from the routing decisions for this tier."""
+    if tier == "trivial":
+        return "trivial: handle directly, lowest effort, no review."
+    impl = route("implementation", tier, config, state, task_key=task_key)
+    if impl["engine"] == "none":
+        return f"{tier}: No engine available ({impl['reason']}); do not start; ask user."
+    review = route("review", tier, config, state, requires_codex_review or tier == "complex",
+                   implementation_engine=impl["engine"])
+    style = route("style_review", tier, config, state)
+
+    def choice(role: str, result: dict) -> str:
+        if result["engine"] == "none":
+            return "none"
+        name = role if result["engine"] == "claude" or role == "codex-reviewer" else "Codex"
+        return f"{name}/{result['model']}/{result['effort']}"
+
+    steps = []
+    if tier in ("complex", "critical"):
+        scout = route("scout", tier, config, state)
+        arch = route("architecture", tier, config, state)
+        steps += [f"scout={choice('scout', scout)}",
+                  f"architect {'if unclear' if tier == 'complex' else 'required'}={choice('architect', arch)}"]
+    steps.append(f"implement={'[Codex] ' if impl['engine'] == 'codex' else ''}{choice('implementer', impl)}")
+    review_role = "verifier" if review["engine"] == "claude" else "codex-reviewer"
+    steps.append(f"review={choice(review_role, review)}")
+    steps.append(f"style={choice('style-reviewer', style)}" if style["engine"] != "none"
+                 else "review covers style")
+    if impl["requires_human_review"]:
+        steps.append("quota constrained: one atomic task, then human review")
+    return f"{tier}: " + "; ".join(steps) + "."
+
+
+def directive(prompt: str, config: dict, state: dict, session_id: str = "") -> str:
+    """Supply per-tier routes for the model to classify with conversation context."""
     if is_question(prompt):
         return "THIS PROMPT: question. Answer it directly: no subagents, no Codex, no file edits."
-    cls = classify(prompt, replying_to)
-    task_route = cls["route"]
-    key_text = effective_text(prompt, replying_to)
-    if is_follow_up(prompt) and not replying_to.strip():
-        key_text += "\0" + session_id
-    task_key = hashlib.sha256(key_text.encode("utf-8")).hexdigest()[:16]
-    impl = route("implementation", task_route, config, state, task_key=task_key)
-    review = route("review", task_route, config, state, cls["requires_codex_review"],
-                   implementation_engine=impl["engine"])
-    head = f"THIS PROMPT: route={task_route} ({cls['reason']}). If it is only a question, just answer it."
-    if impl["engine"] == "none":
-        return f"{head}\nNo engine available ({impl['reason']}): do not start work; ask the user how to proceed."
-    if task_route == "trivial":
-        return f"{head}\nHandle it directly at the lowest effort: no subagents, no review fan-out."
-
-    style = route("style_review", task_route, config, state)
-    skip = "" if style["engine"] == "claude" else \
-        "; the style review is skipped, so also cover standards, best-practice and reduction"
-    steps = []
-    if task_route in ("complex", "critical"):
-        scout = route("scout", task_route, config, state)
-        if scout["engine"] == "claude":
-            steps.append(f"scout with {_agent('scout', scout)}; if the scout reports a different route, "
-                         "rerun route_engine.py once with that --task-route (never downgrade critical)")
-        arch = route("architecture", task_route, config, state)
-        if arch["engine"] == "claude":
-            optional = " only if the root cause or design is unclear" if task_route == "complex" else ""
-            steps.append(f"plan with {_agent('architect', arch)}{optional}")
-    if impl["engine"] == "claude":
-        steps.append(f"implement with {_agent('implementer', impl)}; it may report reroute up/down once")
-    else:
-        steps.append(f"implement on Codex ({impl['reason']}): write a handoff with write_handoff.py, then run "
-                     f"CODEX_SANDBOX=workspace-write CODEX_MODEL={impl['model']} CODEX_EFFORT={impl['effort']} "
-                     f"codex_with_fallback.sh <handoff>; "
-                     f"on exit 42 run engine_state.py mark-limit --engine codex --message \"<first line>\"")
-    test = config["commands"].get("test")
-    if test:
-        steps.append(f"run `{test}`; on failure give the same engine one fix pass with only the failing output; "
-                     f"if it still fails, hand that output to the other engine once (or one Claude tier up), "
-                     f"then stop and ask")
-    else:
-        steps.append("no test command is configured: say so, and rely on the review")
-    if review["engine"] == "claude":
-        steps.append(f"review with {_agent('verifier', review)}{skip}")
-    elif review["engine"] == "codex":
-        steps.append(f"review independently with the `{PLUGIN}:codex-reviewer` agent ({review['reason']}); "
-                     f"put the scripts directory {PLUGIN_ROOT / 'scripts'} and the task id in its prompt{skip}")
-    if style["engine"] == "claude":
-        lint = " passing the lint output if a lint command is configured;"
-        steps.append(f"style review with {_agent('style-reviewer', style)},{lint} "
-                     "run it in parallel with the main review")
-    numbered = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
-    human = "\nQuota is constrained: one atomic task only, then ask for human review." if impl["requires_human_review"] else ""
-    if impl["engine"] == "codex":
-        rule = (f"REQUIRED ({impl['reason']}; do not override for small changes): delegate implementation to "
-                f"Codex and do not edit files in this Claude session.")
-    else:
-        rule = (f"Orchestrate it (pass the model to each Agent call). If this session already runs on "
-                f"{impl['model']} or a cheaper model, you may make a small change inline, but still run tests and review.")
-    plan = "When executing a multi-task plan (e.g. Superpowers), route each plan task separately with route_engine.py --task-id <task> instead of dispatching generic subagents."
-    visibility = ("Visibility: one line before each step saying what starts and why. Run Codex via Bash "
-                  "run_in_background and wait for the completion notification without reading output early. "
-                  "Relay approach and key decisions in at most 3 bullets.")
-    return f"{head}\n{rule}\n{numbered}\n{plan}\n{visibility}{human}"
-
-
-def last_assistant_text(path: str) -> str:
-    last = ""
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                if "assistant" not in line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain"):
-                        continue
-                    blocks = entry.get("message", {}).get("content", [])
-                    text = "\n".join(block.get("text", "") for block in blocks
-                                     if isinstance(block, dict) and block.get("type") == "text")
-                    if text.strip():
-                        last = text
-                except (ValueError, TypeError, AttributeError):
-                    continue
-    except OSError:
-        pass
-    return last
+    cls = classify(prompt)
+    task_key = hashlib.sha256((prompt + "\0" + session_id).encode("utf-8")).hexdigest()[:16]
+    lines = [
+        "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, then follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
+        "Rubric: trivial = conversational, git/commit/push, one-line or config edits; standard = a well-defined change in a few files; complex = multi-component, unclear root cause, design work; critical = security, auth, data/schema, payments, production, irreversible actions.",
+    ]
+    if cls["route"] in ("complex", "critical"):
+        lines.append(f"Floor: at least {cls['route']} ({cls['reason']}); never pick a lower tier.")
+    tiers = ("trivial", "standard", "complex", "critical")
+    floor = tiers.index(cls["route"]) if cls["route"] in ("complex", "critical") else 0
+    rows = [steps_for(tier, config, state, task_key, cls["requires_codex_review"]) for tier in tiers[floor:]]
+    lines.append(f"Agents are {PLUGIN}:<name>.")
+    lines.append(f"Test: {config['commands'].get('test') or 'none configured'}.")
+    if any("Codex/" in row or "codex-reviewer/" in row for row in rows):
+        lines.append("Codex: write_handoff.py, then CODEX_SANDBOX=workspace-write CODEX_MODEL=<model> CODEX_EFFORT=<effort> codex_with_fallback.sh <handoff>.")
+    if any("[Codex]" in row for row in rows):
+        lines.append("Rows marked [Codex] implement on Codex: delegate, do not edit files in this Claude session.")
+    lines.extend(rows)
+    lines.append("If the tier changes mid-task, switch to that row, carry finished work over via a handoff, never downgrade critical.")
+    lines.append("For multi-task plans, route each task separately with route_engine.py --task-id <task>.")
+    lines.append("Visibility: one line before each step saying what starts and why. Run Codex via Bash run_in_background and wait for the completion notification without reading output early. Relay approach and key decisions in at most 3 bullets.")
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -185,10 +141,7 @@ def main() -> int:
     if prompt.lstrip().startswith(SYSTEM_PROMPT_PREFIXES):
         return 0  # Subagent hand-backs and task notifications are not new user tasks.
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd())
-    transcript_path = payload.get("transcript_path") or ""
-    # Ordinary tasks do not need a potentially large transcript read.
-    replying_to = last_assistant_text(transcript_path) if is_follow_up(prompt) else ""
-    context = build_context(root, prompt, replying_to, payload.get("session_id") or transcript_path)
+    context = build_context(root, prompt, payload.get("session_id") or "")
     output = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
     print(json.dumps(output))
     return 0

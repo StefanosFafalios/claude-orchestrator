@@ -4,7 +4,7 @@ A Claude Code plugin (`cost-aware-orchestrator`) that makes Claude Code spend to
 and quota deliberately:
 
 - **Cost-aware routing**: each task is classified as trivial, standard, complex or
-  critical by a deterministic keyword classifier (no LLM call), then routed to the
+  critical by the main model using conversation context and a keyword safety floor, then routed to the
   cheapest sufficient Claude model and effort.
 - **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
   `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), and `codex-reviewer`.
@@ -13,9 +13,8 @@ and quota deliberately:
   work goes to Codex, and vice versa. Review stays on the healthier engine.
 - **Resumable handoffs**: the replacement engine gets a handoff listing completed work
   under `## Do not redo`, never the original broad prompt.
-- **Automatic activation**: on every prompt, a hook classifies the request locally
-  (no network, a few milliseconds) and injects the policy plus a concrete plan for that
-  prompt: which agents, models and engines to use. A broadly scoped skill backs it up.
+- **Automatic activation**: on every prompt, a local hook injects a rubric, safety floor and
+  per-tier routes; the main model classifies using the whole conversation. A broadly scoped skill backs it up.
   You don't need a slash command. Subagent reports are not re-classified.
   Written plans, including Superpowers plans, are routed per task during execution.
 
@@ -27,15 +26,14 @@ your local `claude` and `codex` CLIs.
 
 ## How it works
 
-On every prompt a local hook classifies the request, reads the Claude and Codex quota
-state, and injects a concrete plan built by `route_engine.py`. The chosen engine then executes that
-plan: implement, test, then review in parallel.
+On every prompt a local hook reads quota state and supplies per-tier routes and a keyword
+safety floor. The model classifies using the rubric and conversation, then follows the selected route.
 
 ```mermaid
 flowchart TD
-    P[UserPromptSubmit hook<br/>classify_task.py] --> Q{Question?}
+    P[UserPromptSubmit hook<br/>routes + keyword safety floor] --> Q{Question?}
     Q -- yes --> ANS[Answer directly<br/>no agents, no Codex]
-    Q -- no --> T{Tier}
+    Q -- no --> T{Model classifies<br/>rubric + safety floor}
     T -- trivial --> TRIV[Handle directly<br/>lowest effort, no review]
     T -- standard / complex / critical --> ST[Read engine state<br/>Claude + Codex quota]
     ST --> R[route_engine.py<br/>engine + model + effort per tier]
@@ -178,10 +176,10 @@ Without a command, the policy still applies:
 shared in proportion to each engine's headroom (remaining quota above the near-limit
 line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
 one subscription gets closer to its limit, more work goes to the other. The choice is a
-deterministic hash of the task, so the same task always routes the same way.
+deterministic hash of the prompt and session, so the same prompt in a session routes the same way.
 
-**Re-tiering.** The keyword route is a free first guess; the Haiku scout or the
-implementer may correct it once per task (critical is never downgraded).
+**Re-tiering.** The model chooses the initial route; the Haiku scout or the
+implementer may correct it once per task (never below the safety floor; critical is never downgraded).
 
 **Cross-engine review.** Review always runs on the engine that did not implement, when
 it is healthy: Claude work is reviewed by Codex, and Codex work by Claude.

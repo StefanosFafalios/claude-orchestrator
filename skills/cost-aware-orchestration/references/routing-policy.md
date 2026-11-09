@@ -25,12 +25,15 @@ An engine disabled in `engines` is treated as unavailable. "Constrained" means
 
 ## Re-tiering
 
-The keyword classifier is the free first guess. Once per task, the scout may propose
+The model classifies with the full conversation and rubric. The hook supplies per-tier
+routes and a keyword safety floor covering only the literal prompt text; never choose below
+that floor. The dispatch guard does not check architect tier; the rows guide architect use.
+Once per task, the scout may propose
 any route or the implementer may propose one step up or down for a clear mismatch.
-Never downgrade critical. An upgrade also sets `requires_codex_review`. Rerun
-`route_engine.py` for the new route; an upgrade into
-complex or critical gets an architect plan; once implementation has started, hand off
-completed and remaining work. A re-tier is not a quota fallback and does not use up the
+Never downgrade critical. The main model switches to the new row and carries finished
+work over via a handoff; complex work uses an architect if unclear, critical work always
+does. When routing a separate plan task, rerun `route_engine.py` for its new route and
+set `requires_codex_review` on an upgrade. A re-tier is not a quota fallback and does not use up the
 other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`.
 
 ## Codex tiers
@@ -66,13 +69,15 @@ one escalation to the other engine (or one Claude tier up), then stop and ask.
 |---|---|
 | both healthy, implementer known | the other engine (cross-engine review) |
 | both healthy, critical | Codex (independent adversarial review) |
-| both healthy, complex, classifier set `requires_codex_review` | Codex |
+| both healthy, complex, implementer unknown (`requires_codex_review`) | Codex |
 | both healthy otherwise | Claude: sonnet / medium (trivial: haiku / low) |
 | Codex constrained | Claude |
 | Claude constrained | Codex |
 | both constrained | more remaining quota; human review |
 
 Critical reviews on Claude use `critical_review_model` / `critical_review_effort`.
+The complex row always sets `requires_codex_review`; when the implementer is known,
+cross-engine review takes precedence.
 
 With `review.split` (default true) the main review covers correctness, efficiency and
 security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /

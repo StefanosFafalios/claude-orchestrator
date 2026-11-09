@@ -26,7 +26,7 @@ CRITICAL = {
     "migration": r"\bmigrat(e|es|ion|ions|ing)\b|\bschema change\b|\balter table\b",
     "payment": r"\b(payments?|billing|invoic(e|es|ing)|checkout|refunds?|stripe)\b",
     "security": r"\b(vulnerab\w*|cve-\d+|xss|csrf|sql injection|injection|exploit\w*|encrypt\w*|decrypt\w*)\b",
-    "irreversible": r"\b(irreversibl\w*|drop (the )?(table|database|db|column)|truncate|"
+    "irreversible": r"\b(irreversibl\w*|drop (the )?(?:[\w-]+ )?(table|database|db|column)|truncate|"
     r"delete (the )?(all|data|records|users|branch|db|database)|purge|wipe|"
     r"force[- ]push|rewrite history|rm -rf|reset --hard|push -f)\b|(?<!\w)--force\b",
     "deployment": r"\b(deploy(ment|ing|s)?|release to|rollout|roll out)\b",
@@ -70,53 +70,16 @@ TRIVIAL = {
 }
 
 INVESTIGATION_ONLY = re.compile(COMPLEX["debugging"] + "|" + COMPLEX["uncertain"], re.IGNORECASE)
-FOLLOW_UP = re.compile(
-    r"^\s*(yes|yep|ok(ay)?|sure|nah|go ahead|go for it|please do|proceed|do it|lgtm|sounds good|commit|push|tag)\b",
-    re.IGNORECASE,
-)
 FILE_REF = re.compile(r"\b[\w./-]+\.(py|js|jsx|ts|tsx|go|rs|java|kt|rb|php|cs|c|cc|cpp|h|hpp|sh|sql|ya?ml|toml|json|md)\b")
 CRITICAL_PATHS = re.compile(r"(^|/)(migrations?|alembic|terraform|\.github/workflows|k8s|helm)(/|\b)|\.sql\b|Dockerfile")
 LONG_TASK_WORDS = 60
-SHORT_FOLLOW_UP_WORDS = 8
 
 
 def _hits(text: str, rules: dict) -> list[str]:
     return [name for name, pattern in rules.items() if re.search(pattern, text, re.IGNORECASE)]
 
 
-def is_follow_up(text: str) -> bool:
-    return bool(FOLLOW_UP.match(text) and len(text.split()) <= SHORT_FOLLOW_UP_WORDS
-                and not _hits(text, CRITICAL) and not CRITICAL_PATHS.search(text))
-
-
-def effective_text(task: str, replying_to: str = "") -> str:
-    if is_follow_up(task) and replying_to.strip():
-        replying_to = re.sub(r"(`{3,}|~{3,})[^\n]*\n.*?\1[^\n]*", " ", replying_to, flags=re.DOTALL)
-        replying_to = re.sub(r"(`+).*?\1", " ", replying_to, flags=re.DOTALL)
-        paragraphs = re.split(r"\n\s*\n", replying_to.strip())
-        # The offer may precede a table or list summarizing unrelated work.
-        paragraph = next((part for part in reversed(paragraphs) if "?" in part), replying_to.strip()[-600:])
-        return f"{paragraph} {task}"
-    return task
-
-
-def classify(task: str, replying_to: str = "") -> dict:
-    initial = _classify(task)
-    if initial["route"] == "critical" or not is_follow_up(task):
-        return initial
-    if re.fullmatch(r"\s*(?:no|nah|dont|don't)[.!?\s]*", task, re.IGNORECASE):
-        return _result("standard", "follow-up declines execution", False)
-    if not replying_to.strip():
-        return _result("standard", "follow-up without context; defaulting to standard", False)
-    if (re.search(r"\b(commit|push|tag)\b", task, re.IGNORECASE)
-            and re.fullmatch(r"[\s,!.]*(?:(?:yes|yep|ok|okay|sure|go|ahead|proceed|please|do|it|and|then|commit|push|tag|the|changes|now)[\s,!.]*)+", task, re.IGNORECASE)):
-        return _result("trivial", "follow-up to: explicit git action", False)
-    result = _classify(effective_text(task, replying_to), follow_up=True)
-    result["reason"] = "follow-up to: " + result["reason"]
-    return result
-
-
-def _classify(task: str, follow_up: bool = False) -> dict:
+def classify(task: str) -> dict:
     text = " ".join(task.split())
     if not text:
         return _result("trivial", "empty task: nothing to orchestrate", False)
@@ -130,13 +93,6 @@ def _classify(task: str, follow_up: bool = False) -> dict:
     complex_hits = _hits(text, COMPLEX)
     standard = _hits(text, STANDARD)
     trivial = _hits(text, TRIVIAL)
-    if follow_up and re.search(r"\b(commit|push)\b", text, re.IGNORECASE):
-        other_actions = re.sub(r"\b(?:bump|update)\s+(?:the\s+)?(?:installed\s+)?(?:plugin|version)\b",
-                               "", text, flags=re.IGNORECASE)
-        if not _hits(other_actions, STANDARD) and not re.search(
-                r"\b(delete|remove|rename|install|uninstall)\b", other_actions, re.IGNORECASE):
-            trivial.append("git_action")
-
     if critical:
         return _result("critical", "critical signals: " + ", ".join(critical), True)
     if sensitive and not INVESTIGATION_ONLY.search(text):
@@ -168,18 +124,13 @@ def _result(route: str, reason: str, requires_codex_review: bool) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--task-file", help="file containing the task description (default: stdin)")
-    parser.add_argument("--replying-to-file", help="file containing the previous assistant message")
     args = parser.parse_args(argv)
     if args.task_file:
         with open(args.task_file, encoding="utf-8") as handle:
             task = handle.read()
     else:
         task = sys.stdin.read()
-    replying_to = ""
-    if args.replying_to_file:
-        with open(args.replying_to_file, encoding="utf-8") as handle:
-            replying_to = handle.read()
-    print(json.dumps(classify(task, replying_to), indent=2))
+    print(json.dumps(classify(task), indent=2))
     return 0
 
 
