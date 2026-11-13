@@ -10,6 +10,14 @@ def state(claude="healthy", codex="healthy", claude_pct=100, codex_pct=100):
     return {"claude": entry(claude, claude_pct), "codex": entry(codex, codex_pct)}
 
 
+def write_models(usage_files, *slugs):
+    home = usage_files / "codex"
+    home.mkdir()
+    (home / "models_cache.json").write_text(
+        __import__("json").dumps({"models": [{"slug": slug, "visibility": "list"} for slug in slugs]})
+    )
+
+
 @pytest.fixture
 def config(project):
     return load_config()
@@ -141,6 +149,42 @@ def test_architecture_routing(config):
 def test_codex_tier_equivalents_on_fallback(config, task_route, model, effort):
     result = route("implementation", task_route, config, state(claude="limited", claude_pct=0))
     assert (result["engine"], result["model"], result["effort"]) == ("codex", model, effort)
+
+
+def test_codex_model_preferences_use_first_available(config, usage_files):
+    write_models(usage_files, "gpt-6.1-terra", "gpt-5.6-terra")
+    result = route("implementation", "standard", config, state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["model"]) == ("codex", "gpt-6.1-terra")
+
+
+def test_codex_model_preferences_fall_back_for_plan(config, usage_files):
+    write_models(usage_files, "gpt-5.6-terra")
+    result = route("implementation", "standard", config, state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["model"]) == ("codex", "gpt-5.6-terra")
+
+
+def test_missing_codex_model_cache_uses_first_preference(config):
+    result = route("implementation", "standard", config, state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["model"]) == ("codex", "gpt-6.1-terra")
+
+
+def test_complex_fallback_model_does_not_implement(config, usage_files):
+    write_models(usage_files, "gpt-6-luna")
+    result = route("implementation", "complex", config, state(claude="near_limit", claude_pct=20), task_key="complex")
+    assert (result["engine"], result["model"]) == ("claude", "sonnet")
+
+
+def test_unavailable_codex_model_routes_to_claude(config, usage_files):
+    write_models(usage_files, "unrelated-model")
+    result = route("review", "critical", config, state())
+    assert (result["engine"], result["model"]) == ("claude", "opus")
+
+
+def test_string_codex_model_config_still_works(write_config, usage_files):
+    write_config({"codex": {"tiers": {"standard": {"model": "gpt-5.6-terra"}}}})
+    write_models(usage_files, "gpt-5.6-terra")
+    result = route("implementation", "standard", load_config(), state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["model"]) == ("codex", "gpt-5.6-terra")
 
 
 def test_critical_stays_on_claude(config):

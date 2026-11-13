@@ -172,6 +172,9 @@ Without a command, the policy still applies:
 | complex | debugging, multi-file | sonnet / high, escalate to opus | `gpt-6.1-sol` / high | yes |
 | critical | production, security, migrations, auth/payment | opus / high | `gpt-6-astra` / high (review only) | **no**: stays on Claude |
 
+Codex model settings may be a string or a preference list; when Codex's local model
+cache is available, the first listed model offered by the user's plan wins.
+
 **Adaptive split.** When both engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit
 line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As

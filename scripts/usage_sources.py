@@ -30,6 +30,19 @@ def codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
+def codex_models() -> set[str] | None:
+    """Return models in Codex's local account cache, or ``None`` when unavailable."""
+    try:
+        data = json.loads((codex_home() / "models_cache.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return None
+    return {model["slug"] for model in models
+            if isinstance(model, dict) and isinstance(model.get("slug"), str)}
+
+
 def _seconds(value) -> float | None:
     if not isinstance(value, (int, float)):
         return None

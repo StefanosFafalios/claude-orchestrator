@@ -39,6 +39,9 @@ other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`
 ## Codex tiers
 
 Each route has a Codex equivalent in `codex.tiers` (model, effort, `implement` switch).
+`model` (and `codex.default_model`) may be a string or a preference list; the first
+model present in Codex's local account cache wins. `implement_models` can limit which
+resolved models may implement (by default, every listed model may).
 Defaults: trivial `gpt-6-luna`/low, standard `gpt-6.1-terra`/medium, complex
 `gpt-6.1-sol`/high, critical `gpt-6-astra`/high with `implement: false`. Critical work is
 never implemented on Codex, but Codex may still review it.

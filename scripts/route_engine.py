@@ -19,6 +19,7 @@ import json
 import sys
 
 from engine_state import ConfigError, effective_status, load_config, load_synced_state
+from usage_sources import codex_models
 
 ROLES = ("implementation", "review", "style_review", "scout", "architecture")
 ROUTES = ("trivial", "standard", "complex", "critical")
@@ -56,14 +57,27 @@ class Engines:
         return bool(self.config.get("fallback", {}).get(f"{src}_to_{dst}", True))
 
 
+def _model_list(value) -> list:
+    """A model setting may be one name or a preference-ordered list."""
+    value = [value] if isinstance(value, str) else value
+    return [m for m in value if isinstance(m, str) and m] if isinstance(value, list) else []
+
+
 def codex_tier(config: dict, route: str) -> dict:
     """Codex model/effort for a route, and whether Codex may implement it."""
     codex = config.get("codex", {})
     tier = codex.get("tiers", {}).get(route) or {}
+    preferences = _model_list(tier.get("model") or codex.get("default_model", ""))
+    available = codex_models()
+    if available is None:  # no cache yet: trust the config's first choice
+        model = preferences[0] if preferences else ""
+    else:
+        model = next((m for m in preferences if m in available), "")
+    implement_models = _model_list(tier.get("implement_models", preferences))
     return {
-        "model": tier.get("model") or codex.get("default_model", ""),
+        "model": model,
         "effort": tier.get("effort") or CODEX_EFFORT[route],
-        "implement": bool(tier.get("implement", True)),
+        "implement": bool(tier.get("implement", True)) and model in implement_models,
     }
 
 
@@ -95,7 +109,7 @@ def _quota_route(engines: Engines, route: str, healthy_choice: dict, claude_choi
     """
     config = engines.config
     claude_ok = engines.usable("claude")
-    codex_ok = engines.usable("codex") and codex_allowed
+    codex_ok = engines.usable("codex") and codex_allowed and bool(codex_tier(config, route)["model"])
     # Codex only takes Claude's work when that direction is allowed.
     if engines.constrained("claude") and not engines.fallback_allowed("claude", "codex"):
         codex_ok = False
@@ -118,6 +132,8 @@ def _quota_route(engines: Engines, route: str, healthy_choice: dict, claude_choi
     other = "codex" if only == "claude" else "claude"
     if other == "codex" and not codex_allowed:
         why = f"switched off for {route} tasks"
+    elif other == "codex" and not codex_tier(config, route)["model"]:
+        why = f"unavailable for {route} tasks"
     else:
         why = "disabled" if not engines.enabled[other] else engines.status[other]
     reason = f"{other} is {why}; using {only}"
@@ -147,7 +163,8 @@ def _balanced(engines: Engines, route: str, task_key: str | None, claude_choice:
     balance = engines.config.get("balance", {})
     if (balance.get("mode", "adaptive") != "adaptive" or not task_key
             or route not in balance.get("routes", DEFAULT_BALANCED)
-            or not codex_tier(engines.config, route)["implement"] or not engines.healthy("codex")):
+            or not codex_tier(engines.config, route)["implement"]
+            or not codex_tier(engines.config, route)["model"] or not engines.healthy("codex")):
         return claude_choice
     c_room, x_room = engines.headroom("claude"), engines.headroom("codex")
     codex_share = x_room / (c_room + x_room) if c_room + x_room else 0.5
@@ -184,13 +201,14 @@ def route_review(engines: Engines, route: str, requires_codex_review: bool,
 
     if implementation_engine == "codex":
         healthy_choice = dict(claude_choice, reason="cross-engine review: codex implemented, claude reviews")
-    elif implementation_engine == "claude" and engines.healthy("codex"):
+    elif implementation_engine == "claude" and engines.healthy("codex") and codex_tier(config, route)["model"]:
         healthy_choice = _codex(config, route, "cross-engine review: claude implemented, codex reviews")
-    elif (route == "critical" or (route == "complex" and requires_codex_review)) and engines.healthy("codex"):
+    elif ((route == "critical" or (route == "complex" and requires_codex_review))
+          and engines.healthy("codex") and codex_tier(config, route)["model"]):
         healthy_choice = _codex(config, route, "independent adversarial review on a different engine")
     else:
         healthy_choice = claude_choice
-    return _quota_route(engines, route, healthy_choice, claude_choice)
+    return _quota_route(engines, route, healthy_choice, claude_choice, bool(codex_tier(config, route)["model"]))
 
 
 def route_style_review(engines: Engines, route: str) -> dict:
@@ -208,7 +226,7 @@ def route_scout(engines: Engines, route: str) -> dict:
     config = engines.config
     if engines.healthy("claude"):
         return _claude(config, "scout", "scouting on the cheapest Claude tier")
-    if route in ("complex", "critical") and engines.usable("codex"):
+    if route in ("complex", "critical") and engines.usable("codex") and codex_tier(config, "trivial")["model"]:
         return _codex(config, "trivial", f"claude is {engines.status['claude']}; {route} task needs exploration")
     return _none("claude constrained and task does not require repository exploration; skip scouting")
 
@@ -217,7 +235,8 @@ def route_architecture(engines: Engines, route: str) -> dict:
     config = engines.config
     if engines.healthy("claude"):
         return _claude(config, "architect", "architecture on the strongest Claude tier")
-    if engines.usable("codex") and engines.fallback_allowed("claude", "codex"):
+    if (engines.usable("codex") and engines.fallback_allowed("claude", "codex")
+            and codex_tier(config, "critical")["model"]):
         return _codex(config, "critical", f"claude is {engines.status['claude']}; architecture on codex")
     if engines.usable("claude"):
         model = config["defaults"]["implementation_model"]

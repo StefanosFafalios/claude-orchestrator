@@ -131,6 +131,18 @@ def test_directive_routes_to_codex_when_claude_limited(project):
     assert "trivial: handle directly, lowest effort, no review." in text
 
 
+def test_directive_shows_resolved_codex_model(project, usage_files):
+    (usage_files / "codex").mkdir()
+    (usage_files / "codex" / "models_cache.json").write_text(json.dumps({
+        "models": [{"slug": "gpt-5.6-terra", "visibility": "list"}],
+    }))
+    (project / ".claude" / "engine-state.json").write_text(
+        json.dumps({"claude": {"status": "limited", "remaining_pct": 0}})
+    )
+    text = context(project, "add unit tests for parser")
+    assert "implement=[Codex] Codex/gpt-5.6-terra/medium" in text
+
+
 def test_directive_no_engine_and_constrained_quota(project, write_config):
     write_config({"engines": {"claude": False, "codex": False}})
     text = context(project, "add a button")
