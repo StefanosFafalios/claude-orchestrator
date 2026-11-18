@@ -82,7 +82,7 @@ def _hits(text: str, rules: dict) -> list[str]:
 def classify(task: str) -> dict:
     text = " ".join(task.split())
     if not text:
-        return _result("trivial", "empty task: nothing to orchestrate", False)
+        return _result("trivial", "empty task: nothing to orchestrate")
 
     word_count = len(text.split())
     files = {m.group(0) for m in FILE_REF.finditer(text)}
@@ -94,30 +94,29 @@ def classify(task: str) -> dict:
     standard = _hits(text, STANDARD)
     trivial = _hits(text, TRIVIAL)
     if critical:
-        return _result("critical", "critical signals: " + ", ".join(critical), True)
+        return _result("critical", "critical signals: " + ", ".join(critical))
     if sensitive and not INVESTIGATION_ONLY.search(text):
-        return _result("critical", "changes a sensitive area: " + ", ".join(sensitive), True)
+        return _result("critical", "changes a sensitive area: " + ", ".join(sensitive))
     if complex_hits or len(files) >= 3:
         reasons = complex_hits + ([f"{len(files)} files referenced"] if len(files) >= 3 else [])
-        return _result("complex", "complex signals: " + ", ".join(reasons), bool(sensitive))
+        return _result("complex", "complex signals: " + ", ".join(reasons))
     if trivial and word_count <= LONG_TASK_WORDS and len(files) <= 1:
         # A trivial keyword only wins when no broader work is requested alongside it.
         broader = [hit for hit in standard if hit in ("feature", "tests")]
         if not broader:
-            return _result("trivial", "trivial signals: " + ", ".join(trivial), False)
+            return _result("trivial", "trivial signals: " + ", ".join(trivial))
     if standard:
-        return _result("standard", "standard signals: " + ", ".join(standard), False)
-    return _result("standard", "no specific signals; defaulting to standard", False)
+        return _result("standard", "standard signals: " + ", ".join(standard))
+    return _result("standard", "no specific signals; defaulting to standard")
 
 
-def _result(route: str, reason: str, requires_codex_review: bool) -> dict:
+def _result(route: str, reason: str) -> dict:
     model, effort = TIERS[route]
     return {
         "route": route,
         "recommended_model": model,
         "recommended_effort": effort,
         "reason": reason,
-        "requires_codex_review": requires_codex_review,
     }
 
 

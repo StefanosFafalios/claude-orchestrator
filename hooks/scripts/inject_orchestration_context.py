@@ -71,15 +71,14 @@ def is_question(prompt: str) -> bool:
     return bool((prompt.endswith("?") or QUESTION_START.match(prompt)) and not CHANGE_REQUEST.search(prompt))
 
 
-def steps_for(tier: str, config: dict, state: dict, task_key: str, requires_codex_review: bool) -> str:
+def steps_for(tier: str, config: dict, state: dict, task_key: str) -> str:
     """Build a compact row from the routing decisions for this tier."""
     if tier == "trivial":
         return "trivial: handle directly, lowest effort, no review."
     impl = route("implementation", tier, config, state, task_key=task_key)
     if impl["engine"] == "none":
         return f"{tier}: No engine available ({impl['reason']}); do not start; ask user."
-    review = route("review", tier, config, state, requires_codex_review or tier == "complex",
-                   implementation_engine=impl["engine"])
+    review = route("review", tier, config, state, implementation_model=impl["model"])
     style = route("style_review", tier, config, state)
 
     def choice(role: str, result: dict) -> str:
@@ -118,7 +117,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "") -> s
         lines.append(f"Floor: at least {cls['route']} ({cls['reason']}); never pick a lower tier.")
     tiers = ("trivial", "standard", "complex", "critical")
     floor = tiers.index(cls["route"]) if cls["route"] in ("complex", "critical") else 0
-    rows = [steps_for(tier, config, state, task_key, cls["requires_codex_review"]) for tier in tiers[floor:]]
+    rows = [steps_for(tier, config, state, task_key) for tier in tiers[floor:]]
     lines.append(f"Agents are {PLUGIN}:<name>.")
     lines.append(f"Test: {config['commands'].get('test') or 'none configured'}.")
     if any("Codex/" in row or "codex-reviewer/" in row for row in rows):

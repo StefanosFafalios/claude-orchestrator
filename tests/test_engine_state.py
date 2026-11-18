@@ -90,7 +90,7 @@ def test_project_config_overrides_only_given_fields(write_config):
     assert config["thresholds"]["near_limit_pct"] == 40
     assert config["thresholds"]["critical_limit_pct"] == 10
     assert config["commands"]["test"] == "make test"
-    assert config["defaults"]["scout_model"] == "haiku"
+    assert "defaults" not in config
     assert config["automatic"] is True
 
 

@@ -4,10 +4,11 @@ from engine_state import load_config
 from route_engine import route
 
 
-def state(claude="healthy", codex="healthy", claude_pct=100, codex_pct=100):
+def state(claude="healthy", codex="healthy", claude_pct=100, codex_pct=100, openrouter="healthy", openrouter_pct=100):
     def entry(status, pct):
         return {"status": status, "remaining_pct": pct, "last_error": None, "last_checked": None}
-    return {"claude": entry(claude, claude_pct), "codex": entry(codex, codex_pct)}
+    return {"claude": entry(claude, claude_pct), "codex": entry(codex, codex_pct),
+            "openrouter": entry(openrouter, openrouter_pct)}
 
 
 def write_models(usage_files, *slugs):
@@ -23,11 +24,20 @@ def config(project):
     return load_config()
 
 
+def enable_openrouter(config, monkeypatch):
+    """Turn OpenRouter on with its own model on the standard implementation row."""
+    config["models"]["or-model"] = {"score": 60, "engines": {"openrouter": "vendor/or-model"}}
+    config["engines"]["openrouter"] = True
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    config["routing"]["implementation"]["standard"]["models"].append("or-model")
+
+
 @pytest.mark.parametrize("task_route, model, effort", [
     ("trivial", "haiku", "low"),
     ("standard", "sonnet", "medium"),
     ("complex", "sonnet", "high"),
     ("critical", "opus", "high"),
+    ("supercritical", "opus", "high"),
 ])
 def test_healthy_implementation_tiers(config, task_route, model, effort):
     result = route("implementation", task_route, config, state())
@@ -58,8 +68,6 @@ def test_claude_near_limit(config):
 def test_codex_near_limit(config):
     impl = route("implementation", "standard", config, state(codex="near_limit", codex_pct=15))
     assert (impl["engine"], impl["model"]) == ("claude", "sonnet")
-    both = state(claude="near_limit", codex="near_limit", claude_pct=10, codex_pct=20)
-    assert route("review", "standard", config, both)["engine"] == "codex"
 
 
 @pytest.mark.parametrize("claude_pct, codex_pct, expected", [(20, 10, "claude"), (5, 22, "codex")])
@@ -72,32 +80,45 @@ def test_both_near_limit(config, claude_pct, codex_pct, expected):
     assert route("implementation", "standard", config, s)["scope"] == "single_atomic_task"
 
 
-def test_low_remaining_pct_counts_as_near_limit(config):
-    assert route("implementation", "standard", config, state(claude_pct=10))["engine"] == "codex"
-
-
 def test_both_limited_returns_none(config):
     result = route("implementation", "standard", config, state("limited", "limited", 0, 0))
     assert result["engine"] == "none"
     assert result["requires_human_review"] is True
 
 
-def test_healthy_review_routing(config):
-    assert route("review", "critical", config, state())["engine"] == "codex"
-    assert route("review", "complex", config, state(), requires_codex_review=True)["engine"] == "codex"
-    complex_review = route("review", "complex", config, state())
-    assert (complex_review["engine"], complex_review["model"], complex_review["effort"]) == ("claude", "sonnet", "medium")
-    trivial = route("review", "trivial", config, state())
-    assert (trivial["engine"], trivial["model"], trivial["effort"]) == ("claude", "haiku", "low")
+def test_reviewer_never_same_model(config):
+    r = route("review", "standard", config, state(), implementation_model="sonnet")
+    assert r["canonical_model"] == "gpt-6.1-terra" and r["engine"] == "codex"
+
+
+def test_reviewer_never_weaker_than_implementer(config):
+    # complex row [gpt-6.1-sol 82, sonnet 70, gpt-6-luna 55]: nothing >= 82 except the implementer itself
+    r = route("review", "complex", config, state(), implementation_model="gpt-6.1-sol")
+    assert r["canonical_model"] == "sonnet" and r["requires_human_review"] is True
+    assert "no reviewer at least as capable" in r["reason"]
+
+
+def test_same_model_across_engines_is_skipped(config, monkeypatch):
+    config["models"]["sonnet"]["engines"]["openrouter"] = "anthropic/claude-sonnet-x"
+    config["engines"]["openrouter"] = True
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    r = route("review", "standard", config, state(), implementation_model="anthropic/claude-sonnet-x")
+    assert r["canonical_model"] != "sonnet"
+
+
+def test_review_auto_derives_implementer(config):
+    for i in range(20):
+        impl = route("implementation", "standard", config, state(), task_key=f"t{i}")
+        r = route("review", "standard", config, state(), task_key=f"t{i}", implementation_model="auto")
+        assert r["canonical_model"] != impl["canonical_model"]
 
 
 def test_style_review_routing(config, write_config):
     style = route("style_review", "standard", config, state())
     assert (style["engine"], style["model"], style["effort"]) == ("claude", "haiku", "low")
     assert route("style_review", "trivial", config, state())["engine"] == "none"
-    assert route("style_review", "standard", config, state(claude="limited"))["engine"] == "none"
     skipped = route("style_review", "standard", config, state(claude="limited"))
-    assert skipped["reason"] == "both engines constrained; main review covers style"
+    assert (skipped["engine"], skipped["reason"]) == ("none", "both engines constrained; main review covers style")
     assert route("style_review", "standard", config, state(claude_pct=5))["engine"] == "none"
     assert skipped["requires_human_review"] is False
     write_config({"review": {"split": False}})
@@ -117,28 +138,16 @@ def test_claude_to_codex_fallback_disabled(write_config):
     assert route("implementation", "standard", load_config(), state(claude="limited", claude_pct=0))["engine"] == "none"
 
 
-def test_project_model_overrides(write_config):
-    write_config({"defaults": {"implementation_model": "opus", "implementation_effort": "high"},
-                  "codex": {"tiers": {"standard": {"model": "my-codex", "effort": "low"}}}})
-    config = load_config()
-    impl = route("implementation", "standard", config, state())
-    assert (impl["model"], impl["effort"]) == ("opus", "high")
-    codex = route("implementation", "standard", config, state(claude="limited"))
-    assert (codex["model"], codex["effort"]) == ("my-codex", "low")
-
-
 def test_scout_routing(config):
     assert route("scout", "standard", config, state())["model"] == "haiku"
-    constrained = state(claude="near_limit", claude_pct=20)
-    assert route("scout", "complex", config, constrained)["engine"] == "codex"
-    assert route("scout", "trivial", config, constrained)["engine"] == "none"
+    assert route("scout", "complex", config, state(claude="limited"))["engine"] == "codex"
 
 
 def test_architecture_routing(config):
     assert route("architecture", "complex", config, state())["model"] == "opus"
     assert route("architecture", "complex", config, state(claude="limited"))["engine"] == "codex"
-    downgraded = route("architecture", "complex", config, state(claude="near_limit", codex="limited", claude_pct=20))
-    assert (downgraded["engine"], downgraded["model"], downgraded["effort"]) == ("claude", "sonnet", "high")
+    constrained = route("architecture", "complex", config, state(claude="near_limit", codex="limited", claude_pct=20))
+    assert (constrained["engine"], constrained["model"], constrained["requires_human_review"]) == ("claude", "opus", True)
 
 
 @pytest.mark.parametrize("task_route, model, effort", [
@@ -163,44 +172,33 @@ def test_codex_model_preferences_fall_back_for_plan(config, usage_files):
     assert (result["engine"], result["model"]) == ("codex", "gpt-5.6-terra")
 
 
-def test_missing_codex_model_cache_uses_first_preference(config):
-    result = route("implementation", "standard", config, state(claude="limited", claude_pct=0))
-    assert (result["engine"], result["model"]) == ("codex", "gpt-6.1-terra")
-
-
-def test_complex_fallback_model_does_not_implement(config, usage_files):
-    write_models(usage_files, "gpt-6-luna")
-    result = route("implementation", "complex", config, state(claude="near_limit", claude_pct=20), task_key="complex")
-    assert (result["engine"], result["model"]) == ("claude", "sonnet")
-
-
 def test_unavailable_codex_model_routes_to_claude(config, usage_files):
     write_models(usage_files, "unrelated-model")
     result = route("review", "critical", config, state())
     assert (result["engine"], result["model"]) == ("claude", "opus")
 
 
-def test_string_codex_model_config_still_works(write_config, usage_files):
-    write_config({"codex": {"tiers": {"standard": {"model": "gpt-5.6-terra"}}}})
-    write_models(usage_files, "gpt-5.6-terra")
-    result = route("implementation", "standard", load_config(), state(claude="limited", claude_pct=0))
-    assert (result["engine"], result["model"]) == ("codex", "gpt-5.6-terra")
+def test_exclude_engine_moves_to_next(config):
+    assert route("implementation", "standard", config, state(), exclude=("claude",))["engine"] == "codex"
 
 
-def test_critical_stays_on_claude(config):
+def test_critical_never_implemented_off_claude(config):
     assert route("implementation", "critical", config, state(claude="limited", claude_pct=0))["engine"] == "none"
     near = route("implementation", "critical", config, state(claude="near_limit", claude_pct=20))
     assert (near["engine"], near["model"]) == ("claude", "opus")
-    assert "switched off for critical" in near["reason"]
-    review = route("review", "critical", config, state())
-    assert (review["engine"], review["model"]) == ("codex", "gpt-6-astra"), "codex may still review critical work"
 
 
-def test_tier_switch_is_per_route(write_config):
-    write_config({"codex": {"tiers": {"standard": {"implement": False}}}})
-    config = load_config()
-    assert route("implementation", "standard", config, state(claude="limited", claude_pct=0))["engine"] == "none"
-    assert route("implementation", "complex", config, state(claude="limited", claude_pct=0))["engine"] == "codex"
+def test_openrouter_enabled_without_key_is_ignored(config, monkeypatch):
+    enable_openrouter(config, monkeypatch)
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    picks = {route("implementation", "standard", config, state(), task_key=f"t{i}")["engine"] for i in range(100)}
+    assert "openrouter" not in picks
+
+
+def test_three_way_split_uses_every_healthy_engine(config, monkeypatch):
+    enable_openrouter(config, monkeypatch)
+    picks = {route("implementation", "standard", config, state(), task_key=f"task-{i}")["engine"] for i in range(200)}
+    assert picks == {"claude", "codex", "openrouter"}
 
 
 def split(config, s, task_route="standard", n=400):
@@ -226,13 +224,3 @@ def test_adaptive_split_is_deterministic_and_scoped(config):
 def test_adaptive_split_can_be_turned_off(write_config):
     write_config({"balance": {"mode": "off"}})
     assert split(load_config(), state(claude_pct=30, codex_pct=100)) == 0
-
-
-def test_cross_engine_review(config):
-    s = state()
-    assert route("review", "standard", config, s, implementation_engine="claude")["engine"] == "codex"
-    claude_review = route("review", "standard", config, s, implementation_engine="codex")
-    assert (claude_review["engine"], claude_review["model"]) == ("claude", "sonnet")
-    auto = [route("review", "standard", config, s, task_key=f"t{i}", implementation_engine="auto") for i in range(50)]
-    impls = [route("implementation", "standard", config, s, task_key=f"t{i}")["engine"] for i in range(50)]
-    assert all(r["engine"] != e for r, e in zip(auto, impls))

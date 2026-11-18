@@ -51,3 +51,4 @@ def test_legacy_project_keys_are_reported_not_fatal(write_config):
     config = load_config()
     assert config["legacy_keys"] == ["defaults", "codex.tiers"]
     assert config["codex"]["max_files_per_fallback"] == 3
+    assert "defaults" not in config and "tiers" not in config["codex"]

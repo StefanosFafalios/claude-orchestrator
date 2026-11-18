@@ -1,18 +1,4 @@
 {
-  "defaults": {
-    "scout_model": "haiku",
-    "scout_effort": "low",
-    "implementation_model": "sonnet",
-    "implementation_effort": "medium",
-    "architect_model": "opus",
-    "architect_effort": "high",
-    "review_model": "sonnet",
-    "review_effort": "medium",
-    "critical_review_model": "opus",
-    "critical_review_effort": "high",
-    "style_review_model": "haiku",
-    "style_review_effort": "low"
-  },
   "review": {
     "split": true
   },
@@ -56,48 +42,7 @@
     }
   },
   "codex": {
-    "default_model": [
-      "gpt-6.1-sol",
-      "gpt-6-luna"
-    ],
-    "max_files_per_fallback": 5,
-    "tiers": {
-      "trivial": {
-        "model": [
-          "gpt-6-luna",
-          "gpt-5.6-luna"
-        ],
-        "effort": "low",
-        "implement": true
-      },
-      "standard": {
-        "model": [
-          "gpt-6.1-terra",
-          "gpt-5.6-terra"
-        ],
-        "effort": "medium",
-        "implement": true
-      },
-      "complex": {
-        "model": [
-          "gpt-6.1-sol",
-          "gpt-6-luna"
-        ],
-        "effort": "high",
-        "implement": true,
-        "implement_models": [
-          "gpt-6.1-sol"
-        ]
-      },
-      "critical": {
-        "model": [
-          "gpt-6-astra",
-          "gpt-6-luna"
-        ],
-        "effort": "high",
-        "implement": false
-      }
-    }
+    "max_files_per_fallback": 5
   },
   "balance": {
     "mode": "adaptive",

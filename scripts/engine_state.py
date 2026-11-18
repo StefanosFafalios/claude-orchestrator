@@ -103,6 +103,9 @@ def load_config(root: Path | None = None) -> dict:
         project_raw = _read_json(path)
         config = deep_merge(config, project_raw)
     config["legacy_keys"] = model_map.legacy_keys(project_raw)
+    config.pop("defaults", None)  # legacy keys are reported above and ignored
+    config.get("codex", {}).pop("tiers", None)
+    config.get("codex", {}).pop("default_model", None)
     model_map.validate(config)
     config.setdefault("automatic", True)
     config.setdefault("usage_sync", True)
