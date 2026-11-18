@@ -210,9 +210,9 @@ causes that defeated a critical-tier attempt.
     in the same plan inherit the answer. A supercritical task under a non-supercritical parent
     is asked once and passes its answer down.
   - *Auto mode off:* ask on every supercritical task separately.
-  - *Can't ask (headless run):* inherit an answer from a supercritical ancestor if there is one;
-    otherwise use `medium` in auto mode, and pause with `requires_human_review` when auto mode is
-    off.
+  - *Can't ask (headless run):* in auto mode, inherit an answer from a supercritical ancestor if
+    there is one, otherwise use `medium`. With auto mode off, pause with `requires_human_review`
+    (outside auto mode every supercritical task gets its own answer, so nothing is inherited).
   - Auto mode is read from the permission mode Claude Code passes to hooks (exact field and value
     verified during the build). If it can't be determined, treat auto mode as off.
 - **Ordering:** linear, above `critical`. It inherits critical's safeguards (architect required,
