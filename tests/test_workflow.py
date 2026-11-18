@@ -85,22 +85,63 @@ def test_style_review_runs_in_parallel_and_merges(repo, write_config):
     assert "style review is skipped" not in main["prompt"]
 
 
-@pytest.mark.parametrize("task_route", ["standard", "complex"])
-def test_openrouter_first_scout_and_style_still_run_on_claude(repo, write_config, monkeypatch, task_route):
-    # The workflow dispatches scout and style review as Claude agents only, so an
-    # OpenRouter-first row must fall back to Claude instead of skipping them.
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+SCOUT_AGENTS = {"scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
+                "review:codex": NO_FINDINGS, "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS,
+                "review:style:openrouter": dict(NO_FINDINGS, exit_code=0)}
+
+
+def or_first_scout_and_style(write_config, monkeypatch, task_route):
+    """OpenRouter on, with the scout and style rows led by an OpenRouter-only model."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("OPENROUTER_POLL_SECONDS", "0.2")
     cheap = {"models": ["or-cheap", "haiku"], "effort": "low"}
     write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
                   "models": {"or-cheap": {"score": 60, "engines": {"openrouter": "vendor/cheap"}}},
                   "routing": {"scout": {task_route: cheap}, "style_review": {task_route: cheap}}})
-    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {"route": task_route, "reason": "test"}},
-                     "agents": {"scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
-                                "review:codex": NO_FINDINGS, "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS}})
-    agents = {c["label"]: c for c in out["calls"] if c["kind"] == "agent"}
+    return {"route": task_route, "reason": "test"}
+
+
+@pytest.mark.parametrize("task_route", ["standard", "complex"])
+def test_scout_and_style_review_run_on_openrouter(repo, write_config, monkeypatch, fake_openrouter, task_route):
+    classification = or_first_scout_and_style(write_config, monkeypatch, task_route)
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": classification}, "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
     assert out["result"]["route"] == task_route
-    assert (agents["scout"]["agentType"], agents["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
-    assert (agents["review:style"]["agentType"], agents["review:style"]["model"]) == ("cost-aware-orchestrator:style-reviewer", "haiku")
+    assert "scout" not in calls and calls["scout:openrouter"]["exit_code"] == 0
+    assert list(repo.joinpath(*RUNS).iterdir()), "the scout ran through openrouter_run.py"
+    assert "Scout findings (vendor/cheap):" in calls["implement:claude"]["prompt"]
+    style = calls["review:style:openrouter"]
+    assert style["agentType"] == "cost-aware-orchestrator:codex-reviewer" and "review:style" not in calls
+    assert "openrouter_run.py" in style["prompt"] and "vendor/cheap" in style["prompt"]
+    assert "This is the style review" in style["prompt"]
+
+
+def test_scout_usage_limit_reroutes_to_claude(repo, write_config, monkeypatch, fake_openrouter):
+    fake_openrouter.key_data["limit_remaining"] = 0  # the runner refuses with exit 42
+    classification = or_first_scout_and_style(write_config, monkeypatch, "standard")
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": classification}, "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert calls["scout:openrouter"]["exit_code"] == 42
+    assert (calls["scout"]["agentType"], calls["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
+    assert {"phase": "scout", "from": "openrouter", "to": "claude", "reason": "openrouter usage limit"} in out["result"]["fallback_events"]
+    assert state(repo)["openrouter"]["status"] == "limited"
+    assert calls["review:style"]["model"] == "haiku", "style review re-routed away from the limited engine"
+
+
+def test_claude_only_scout_and_style_use_agents(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert (calls["scout"]["agentType"], calls["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
+    assert (calls["review:style"]["agentType"], calls["review:style"]["model"]) == ("cost-aware-orchestrator:style-reviewer", "haiku")
+
+
+def test_constrained_scout_is_not_run(repo, write_config):
+    # Near the limit the router asks for one atomic task and a human: not worth a scout.
+    write_config({"engines": {"codex": False}})
+    (repo / ".claude" / "engine-state.json").write_text(json.dumps({"claude": {"status": "near_limit", "remaining_pct": 20}}))
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert "scout" not in labels(out["calls"]) and "implement:claude" in labels(out["calls"])
 
 
 def test_unsplit_review_skips_style_agent(repo, write_config):

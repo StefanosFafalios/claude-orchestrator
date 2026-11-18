@@ -179,8 +179,6 @@ log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
 phase('Route')
 const routeCmd = (role, extra = '') => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${ROUTE_FLAGS}${extra}`
-// Scout and style review run only as Claude agents here: route them on Claude rather than skip them.
-const CLAUDE_ONLY = ' --exclude-engine codex --exclude-engine openrouter'
 
 // implModel 'auto' lets the router derive the implementer, so review picks a different, at least as capable model.
 async function routeAll(phaseName, implModel = 'auto') {
@@ -191,10 +189,10 @@ async function routeAll(phaseName, implModel = 'auto') {
       `echo ===STATE===`, `${PY('engine_state.py')} status`,
       `echo ===CONFIG===`, `${PY('engine_state.py')} config`,
       `echo ===IMPLEMENTATION===`, routeCmd('implementation'),
-      `echo ===SCOUT===`, routeCmd('scout', CLAUDE_ONLY),
+      `echo ===SCOUT===`, routeCmd('scout'),
       `echo ===ARCHITECTURE===`, routeCmd('architecture'),
       `echo ===REVIEW===`, routeCmd('review', ` --implementation-model ${q(implModel)}`),
-      `echo ===STYLE_REVIEW===`, routeCmd('style_review', CLAUDE_ONLY),
+      `echo ===STYLE_REVIEW===`, routeCmd('style_review'),
     ]),
     'route', phaseName,
   )
@@ -349,22 +347,48 @@ async function plan() {
   return null
 }
 
+// Scout on the routed engine: Claude's scout agent, or the engine's wrapper read-only. A constrained
+// pick (one atomic task, human review) is not worth the quota. Returns a stop result or null.
+async function scoutPass() {
+  const prompt = `Task (${ROUTE}): ${TASK}\n\nFind the files and symbols this task touches and summarize the impact.`
+  const tried = []
+  let sr = routing.SCOUT
+  while (true) {
+    if (sr.engine === 'none' || sr.scope === 'single_atomic_task' || sr.requires_human_review) {
+      log(`scout skipped: ${sr.engine === 'none' ? sr.reason : `${sr.engine} is constrained`}`)
+      return null
+    }
+    if (sr.engine === 'claude') {
+      const scout = await agent(prompt, {
+        agentType: `${PLUGIN}:scout`, label: 'scout', phase: 'Scout', schema: SCOUT_SCHEMA, model: sr.model, effort: sr.effort,
+      })
+      if (scout) {
+        scoutFiles = scout.files || []
+        context += `\n\nScout findings:\nFiles: ${scoutFiles.join(', ')}\nSymbols: ${(scout.symbols || []).join(', ')}\nImpact: ${scout.impact}`
+        if (scout.route) await reroute('scout', scout.route, scout.route_reason)
+      }
+      return null
+    }
+    const w = await runWrapper(sr.engine, sr, `${RUN}/scout.md`, 'read-only', `scout:${sr.engine}`, 'Scout', `${prompt}\nDo not modify files.`)
+    if (w.paused) return stop(w.paused)
+    if (w.code !== 42) {
+      if (w.code === 0) context += `\n\nScout findings (${sr.model}):\n${w.output.slice(-3000)}`
+      else log(`scout failed (${sr.engine} exit ${w.code}); continuing without it`)
+      return null
+    }
+    await markLimit(sr.engine, 'Scout')
+    tried.push(sr.engine)
+    const next = await routeRole('scout', tried, 'Scout')
+    fallbackEvents.push({ phase: 'scout', from: sr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${sr.engine} usage limit` })
+    sr = next
+  }
+}
+
 // A resumed handoff already carries its context: no scout or plan.
 if (ROUTE !== 'trivial' && !ARGS.handoff) {
   phase('Scout')
-  const sr = routing.SCOUT
-  if (sr.engine === 'claude') {
-    const scout = await agent(`Task (${ROUTE}): ${TASK}\n\nFind the files and symbols this task touches and summarize the impact.`, {
-      agentType: `${PLUGIN}:scout`, label: 'scout', phase: 'Scout', schema: SCOUT_SCHEMA, model: sr.model, effort: sr.effort,
-    })
-    if (scout) {
-      scoutFiles = scout.files || []
-      context += `\n\nScout findings:\nFiles: ${scoutFiles.join(', ')}\nSymbols: ${(scout.symbols || []).join(', ')}\nImpact: ${scout.impact}`
-      if (scout.route) await reroute('scout', scout.route, scout.route_reason)
-    }
-  } else {
-    log(`scout skipped: ${sr.reason}`)
-  }
+  const scoutStop = await scoutPass()
+  if (scoutStop) return scoutStop
 }
 if (impl.engine === 'none') return noEngine()
 const planStop = await plan()
@@ -529,7 +553,7 @@ let reviewFindings = []
 let reviewEngine = review.engine
 let styleFindings = []
 const styleRoute = routing.STYLE_REVIEW
-const styleReview = styleRoute.engine === 'claude' && (result.files_changed || []).length > 0
+const styleReview = styleRoute.engine !== 'none' && (result.files_changed || []).length > 0
 if (review.requires_human_review) requiresHumanReview = true
 
 const SKIP_NOTE = '\nThe style review is skipped: also cover standards, best-practice and reduction.'
@@ -549,15 +573,37 @@ async function runLint() {
   return l.stdout
 }
 
-// Cheap standards/best-practice/reduction pass; null means the agent failed.
+// Cheap standards/best-practice/reduction pass on the routed engine: Claude's style-reviewer, or the
+// relay agent and the engine's wrapper. Returns {findings, exit_code?} or null when the agent failed.
+function styleOn(r, lint) {
+  const brief = `${reviewBrief}\nLint output (do not repeat these findings):\n${lint}`
+  if (r.engine === 'claude') {
+    return agent(brief, {
+      agentType: `${PLUGIN}:style-reviewer`, label: 'review:style', phase: 'Review', schema: FINDINGS_SCHEMA, model: r.model, effort: r.effort,
+    })
+  }
+  const request = `${RUN}/style-review.md`
+  return agent(`${brief}\n\nThis is the style review: ask only for standards, best-practice and reduction findings.\n` +
+    `Plugin scripts directory: ${SCRIPTS}\nWrite the request to ${request} and run it on ${r.engine} model ${r.model} with:\n` +
+    `${WRAPPERS[r.engine](r, 'read-only')} ${q(request)}`, {
+    agentType: `${PLUGIN}:codex-reviewer`, label: `review:style:${r.engine}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: 'haiku', effort: 'low',
+  })
+}
+
+// Findings, [] when skipped, or null when the style review failed (a wrapper error or an OpenRouter pause).
 async function runStyleReview() {
   if (!styleReview) return []
   const lint = await runLint()
-  const out = await agent(`${reviewBrief}\nLint output (do not repeat these findings):\n${lint}`, {
-    agentType: `${PLUGIN}:style-reviewer`, label: 'review:style', phase: 'Review', schema: FINDINGS_SCHEMA,
-    model: styleRoute.model, effort: styleRoute.effort,
-  })
-  return out ? out.findings : null
+  let out = await styleOn(styleRoute, lint)
+  if (out && out.exit_code === 42) {
+    await markLimit(styleRoute.engine, 'Review')
+    const next = await routeRole('style_review', [styleRoute.engine], 'Review')
+    fallbackEvents.push({ phase: 'style_review', from: styleRoute.engine, to: next.engine === 'none' ? null : next.engine,
+      reason: `${styleRoute.engine} usage limit` })
+    if (next.engine === 'none') return []  // the router hands style to the main review
+    out = await styleOn(next, lint)
+  }
+  return out && !out.exit_code ? out.findings : null
 }
 
 // Main review on the routed engine: Claude reviews directly, Codex/OpenRouter through the relay

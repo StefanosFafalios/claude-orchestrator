@@ -66,8 +66,9 @@ Workflow:
    tasks get no review.
    `verifier` on Claude; `codex-reviewer` on Codex or OpenRouter (its prompt names the
    wrapper, `codex_with_fallback.sh` or `openrouter_run.py`, and the model). Also run
-   `--role style_review`: when it returns claude, `style-reviewer` (haiku/low) covers
-   standards, best-practice and reduction in parallel, given the lint output if configured.
+   `--role style_review`: it covers standards, best-practice and reduction in parallel, given
+   the lint output if configured, as `style-reviewer` on Claude or as `codex-reviewer`
+   (asked for those categories only) on Codex or OpenRouter.
 13. If an engine exits with code 42, mark it limited
     (`engine_state.py mark-limit --engine <engine> --message "<first line>"`), create a
     handoff with `write_handoff.py` listing completed and remaining work, and re-route the

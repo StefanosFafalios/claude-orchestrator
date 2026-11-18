@@ -65,7 +65,7 @@ flowchart TD
     OK -- yes --> REV
     subgraph REV [Parallel review]
         MR[Main review: cheapest model for the tier<br/>never weaker than implementer, never the same model]
-        SR[style-reviewer, haiku<br/>skipped if Claude constrained<br/>or review.split is false]
+        SR[style review, cheapest model<br/>skipped if its engine is constrained<br/>or review.split is false]
     end
     REV --> DONE[Report result]
 ```

@@ -40,6 +40,7 @@ Ask it to check, tagging each finding with one category:
 - efficiency: needless passes, repeated I/O or subprocesses, poor data structures, O(n^2)
 - security: trust-boundary validation, injection, shell quoting, secrets, paths, data handling
 Standards, best-practice and reduction are covered by the separate style review unless the prompt
-says the style review is skipped.
+says the style review is skipped. If the prompt says this *is* the style review, ask only for
+standards, best-practice and reduction findings instead.
 Give a concrete suggestion per finding. Skip pure taste.
 Do not ask it to implement unless explicitly requested.

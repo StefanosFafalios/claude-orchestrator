@@ -87,13 +87,14 @@ With `review.split` (default true) the main review covers correctness, efficienc
 security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /
 `style_review_effort`, haiku / low) for standards, best-practice and reduction. It is
 skipped for trivial tasks, when `review.split` is false (the main review then covers all
-six categories) or when its routed engine is constrained. The smart-task workflow routes
-scout and style review on Claude only (`--exclude-engine`), since it runs them as Claude agents.
+six categories) or when its routed engine is constrained. Off Claude it runs as
+`codex-reviewer` through the engine's wrapper; exit 42 marks that engine limited and re-routes.
 
 ## Scout
 
-The cheapest model in the scout row, low effort, on the first healthy engine that serves one.
-Trivial tasks get no scout.
+The cheapest model in the scout row, low effort, on the first healthy engine that serves one;
+off Claude it runs read-only through the engine's wrapper. A constrained pick (one atomic
+task, human review) is skipped rather than spending scarce quota. Trivial tasks get no scout.
 
 ## Architecture
 
