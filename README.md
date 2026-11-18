@@ -12,8 +12,9 @@ and quota deliberately:
   OpenRouter (pay-per-token, under a yearly allowance you choose; off by default).
 - **Quota fallback**: when an engine is near or at its limit, the remaining work goes
   to another usable engine.
-- **Capability-based review**: the reviewer is the best model for the task's tier, on
-  any engine, never weaker than the implementer and never the exact same model.
+- **Capability-based review**: the reviewer is the cheapest model in the task's review
+  row that is at least as capable as the implementer, on any engine, and never the exact
+  same model. Trivial tasks get no model review; tests and lint gate them.
 - **Resumable handoffs**: the replacement engine gets a handoff listing completed work
   under `## Do not redo`, never the original broad prompt.
 - **Automatic activation**: on every prompt, a local hook injects a rubric, safety floor and
@@ -63,7 +64,7 @@ flowchart TD
     FIX --> OK
     OK -- yes --> REV
     subgraph REV [Parallel review]
-        MR[Main review: best model for the tier<br/>never weaker than implementer, never the same model]
+        MR[Main review: cheapest model for the tier<br/>never weaker than implementer, never the same model]
         SR[style-reviewer, haiku<br/>skipped if Claude constrained<br/>or review.split is false]
     end
     REV --> DONE[Report result]
@@ -167,7 +168,7 @@ Without a command, the policy still applies:
 | "Fix this typo" | Claude haiku/low, no fan-out |
 | "Add tests for this module" | sonnet/medium with a focused implementer |
 | "Debug this intermittent failure" | scout, then sonnet/high (opus/high if needed) |
-| "Refactor authentication and add tests" | critical: architect plan, the critical implementation row implements, the best model for the tier reviews (never weaker, never the same model) |
+| "Refactor authentication and add tests" | critical: architect plan, the critical implementation row implements, the cheapest sufficient model for the tier reviews (never weaker, never the same model) |
 | "What does this function do?" | answered directly; no workflow |
 
 ## Routing policy
@@ -196,10 +197,10 @@ deterministic hash of the prompt and session, so the same prompt in a session ro
 **Re-tiering.** The model chooses the initial route; the Haiku scout or the
 implementer may correct it once per task (never below the safety floor; critical is never downgraded).
 
-**Capability-based review.** The reviewer is the best model for the task's tier from the
-map, on whichever engine can serve it. It is never weaker than the implementer, and if
-the pick is the exact same model that implemented (on any engine), the next-best
-comparable model reviews instead. The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
+**Capability-based review.** Review rows are ordered cheapest first, and the reviewer is
+the first model in the task's row that is at least as capable as the implementer, on
+whichever engine can serve it. It is never the exact same model that implemented (on any
+engine). Trivial tasks get no model review: the tests and lint gate them. The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
 covers standards, best practices and code/text reduction (set `review.split` to false to merge them).
 
 **Test gate.** If the project's tests fail, the same engine gets one fix pass with only
@@ -222,8 +223,8 @@ Tune it per project:
 ```
 
 Existing `defaults` and `codex.tiers` keys still work as overrides. Set
-`"balance": {"mode": "off"}` to keep Claude as the primary engine, so the others work
-only as fallbacks and reviewers.
+`"balance": {"mode": "off"}` to send each route to the engine of its first-listed
+model, so the others work only as fallbacks and reviewers.
 
 ## Supercritical tier
 

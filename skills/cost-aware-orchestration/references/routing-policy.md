@@ -74,11 +74,11 @@ one escalation to the other engine (or one Claude tier up), then stop and ask.
 
 ## Review
 
-The reviewer is chosen by capability, not by engine: the best sufficient model for the
-route that is at least as capable as the implementer's model (`--implementation-model`),
+The reviewer is chosen by capability, not by engine: the first model in the route's
+row (rows are ordered cheapest first) that is at least as capable as the implementer's model (`--implementation-model`),
 on whichever engine can serve it, using the same headroom and constrained rules as
 implementation. Same-model safeguard: if the pick is the model that implemented (any
-engine), use the next-best of comparable capability. Supercritical review uses the top
+engine), it is skipped. Trivial tasks get no model review: the tests and lint gate them. Supercritical review uses the top
 model, which never implements. Claude reviews run as `verifier`; Codex and OpenRouter
 reviews as `codex-reviewer`, whose prompt names the wrapper and model. Critical reviews on
 Claude use `critical_review_model` / `critical_review_effort`.
@@ -87,16 +87,18 @@ With `review.split` (default true) the main review covers correctness, efficienc
 security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /
 `style_review_effort`, haiku / low) for standards, best-practice and reduction. It is
 skipped for trivial tasks, when `review.split` is false (the main review then covers all
-six categories) or when Claude is unavailable.
+six categories) or when its routed engine is constrained. The smart-task workflow runs it
+only on Claude.
 
 ## Scout
 
-Claude haiku / low when Claude is healthy. When Claude is constrained, another engine scouts only
-complex or critical tasks (they genuinely need exploration); otherwise `engine: none`.
+The cheapest model in the scout row, low effort, on the first healthy engine that serves one.
+Trivial tasks get no scout.
 
 ## Architecture
 
-Claude opus / high when Claude is healthy (top model, asked effort, for supercritical).
+Claude first while healthy: sonnet / high for trivial and standard (used only to escalate a
+failed fix), opus / high for complex and critical, the top model with asked effort for supercritical.
 Claude constrained and another engine usable: that engine.
 Claude near limit and the others limited: Claude sonnet / high instead of opus, with human review.
 

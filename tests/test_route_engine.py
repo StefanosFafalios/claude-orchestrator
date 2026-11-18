@@ -1,6 +1,8 @@
 import pytest
+from conftest import TEMPLATE
 
 from engine_state import load_config
+from model_map import engine_name, row, score
 from route_engine import route
 
 
@@ -104,6 +106,21 @@ def test_trivial_tasks_get_no_review_or_scout(config):
     for role in ("review", "style_review", "scout"):
         r = route(role, "trivial", config, state(), implementation_model="haiku")
         assert (r["engine"], r["requires_human_review"]) == ("none", False), role
+
+
+@pytest.mark.parametrize("only", ["claude", "codex"])
+@pytest.mark.parametrize("task_route", ["standard", "complex", "critical", "supercritical"])
+def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, only, task_route):
+    """Cheapest-first review rows still hold a stronger, different reviewer on a single engine."""
+    monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
+    write_config({"engines": {"claude": only == "claude", "codex": only == "codex"}})
+    config = load_config()
+    for model in row(config, "implementation", task_route)["models"]:
+        if not engine_name(config, model, only):
+            continue
+        r = route("review", task_route, config, state(), implementation_model=model)
+        assert r["engine"] == only and r["requires_human_review"] is False, (model, r)
+        assert r["canonical_model"] != model and score(config, r["canonical_model"]) >= score(config, model)
 
 
 def test_review_defaults_by_route(config):

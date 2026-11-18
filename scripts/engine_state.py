@@ -96,7 +96,8 @@ def load_config(root: Path | None = None) -> dict:
     """Plugin defaults overlaid by the project's ``.claude/orchestrator.config.json``."""
     import model_map  # imported here: model_map imports ConfigError from this module
 
-    config = _read_json(DEFAULT_CONFIG_PATH)
+    # Tests point this at a frozen capability map so a re-seeded template does not break them.
+    config = _read_json(Path(os.environ.get("ORCHESTRATOR_DEFAULT_CONFIG") or DEFAULT_CONFIG_PATH))
     path = config_path(root)
     project_raw: dict = {}
     if path.is_file():

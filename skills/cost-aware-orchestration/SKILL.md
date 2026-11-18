@@ -61,8 +61,9 @@ Workflow:
    only the failing output (via a handoff); if it still fails, hand it once to another
    engine (`--exclude-engine`, or one Claude tier up), then stop and ask.
 12. For review, run `route_engine.py --role review --task-route <route> --implementation-model <model>`.
-   The reviewer is chosen by capability, not engine: the best sufficient model at least as
-   capable as the implementer, never the same model that implemented (it picks the next-best).
+   The reviewer is chosen by capability, not engine: the cheapest model in the route's row at
+   least as capable as the implementer, never the same model that implemented. Trivial
+   tasks get no review.
    `verifier` on Claude; `codex-reviewer` on Codex or OpenRouter (its prompt names the
    wrapper, `codex_with_fallback.sh` or `openrouter_run.py`, and the model). Also run
    `--role style_review`: when it returns claude, `style-reviewer` (haiku/low) covers

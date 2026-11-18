@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+TEMPLATE = ROOT / "templates" / "orchestrator.config.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "hooks" / "scripts"))
 
@@ -23,6 +24,11 @@ def usage_files(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("ORCHESTRATOR_OPENROUTER_MODELS_FILE", str(base / "openrouter-models.json"))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_BASE", raising=False)
+    # Tests pin model ids and scores: run them on a frozen map, not the shipped (re-seeded) one.
+    config = json.loads(TEMPLATE.read_text())
+    config.update(json.loads((ROOT / "tests" / "capability_map.json").read_text()))
+    (base / "default-config.json").write_text(json.dumps(config))
+    monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(base / "default-config.json"))
     return base
 
 

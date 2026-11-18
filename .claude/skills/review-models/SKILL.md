@@ -37,12 +37,23 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
 ## 3. Fit
 
 - Set a minimum score bar per role x route.
-- List every model clearing the bar. Order cheapest-first for implementation, scout and
-  style_review; strongest-first for review and architecture.
+- List every model clearing the bar. Order every row cheapest-first by blended OpenRouter
+  price; on a tie, the higher score goes first. Review rows can stay cheapest-first because
+  the router keeps quality: it takes the first reviewer that scores at least the
+  implementer's model and is not that model.
+- Coverage: for every model an implementation row can pick on a Claude-only or a
+  Codex-only setup, the review row for that route must hold a different model on the same
+  engine scoring at least as high (the shipped-template test in `tests/test_route_engine.py`
+  checks this). Strong models appended at the end of a review row cost nothing until needed.
+- Never add a model below the quality bar just to give an engine work (no Codex-only tails):
+  unavailable Codex names are skipped automatically.
 - `supercritical` rows hold only the top models.
+- Trivial tasks get no scout and no model review: there are no `review`, `style_review` or
+  `scout` rows for `trivial` (`model_map.UNUSED`).
 - The same canonical model on several engines is one `models` entry with several `engines`
   names (e.g. `claude` and `openrouter` slugs).
-- Keep a comparable runner-up in review rows for the same-model safeguard.
+- Claude aliases (`haiku`, `sonnet`, `opus`) move with each Claude release while OpenRouter
+  slugs are pinned: re-run this review on every Claude release.
 
 ## 4. Proposal
 
@@ -51,7 +62,7 @@ for the owner's approval before touching any file.
 
 ## 5. Apply
 
-1. Edit `templates/orchestrator.config.json`.
+1. Edit `templates/orchestrator.config.json`, including `map_meta.reviewed` (today's date).
 2. Bump `version` in `.claude-plugin/plugin.json`. (A seed done in the same release as another
    bump does not bump twice.)
 3. Smoke-test each new OpenRouter slug:

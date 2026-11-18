@@ -1,7 +1,10 @@
+import json
+
 import pytest
+from conftest import TEMPLATE
 
 from engine_state import ConfigError, load_config
-from model_map import UNUSED, canonical, engine_name, row
+from model_map import UNUSED, canonical, engine_name, row, validate
 from test_route_engine import write_models
 
 
@@ -32,6 +35,14 @@ def test_unknown_model_in_routing_is_config_error(write_config):
     write_config({"routing": {"review": {"standard": {"models": ["ghost"], "effort": "low"}}}})
     with pytest.raises(ConfigError, match="ghost"):
         load_config()
+
+
+def test_shipped_template_validates_without_unused_rows():
+    template = json.loads(TEMPLATE.read_text())
+    assert template["map_meta"]["log"] == ".claude/skills/review-models/decision-log.md"
+    for role, route in UNUSED:
+        assert route not in template["routing"][role]
+    validate(template)
 
 
 def test_unused_rows_are_ignored(write_config):

@@ -11,8 +11,8 @@ implemented behavior; flag stale documentation rather than treating it as a requ
 `cost-aware-orchestrator` is a reusable Claude Code plugin. It routes work to the
 cheapest sufficient model/effort across three engines (Claude, Codex and the optional
 OpenRouter), falls back between them on usage limits through resumable handoffs, and
-picks reviewers by capability: the best model for the tier, never weaker than the
-implementer and never the exact same model. It must work in any project: no repository-specific paths, commands,
+picks reviewers by capability: the cheapest model in the tier's review row that is at
+least as capable as the implementer and never the exact same model. It must work in any project: no repository-specific paths, commands,
 model names or credentials are hard-coded. Per-project settings live in the consuming
 project's `.claude/orchestrator.config.json`.
 

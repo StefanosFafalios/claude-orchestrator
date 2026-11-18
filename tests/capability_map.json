@@ -1,0 +1,226 @@
+{
+  "models": {
+    "haiku": {
+      "score": 40,
+      "engines": {
+        "claude": "haiku"
+      }
+    },
+    "sonnet": {
+      "score": 70,
+      "engines": {
+        "claude": "sonnet"
+      }
+    },
+    "opus": {
+      "score": 85,
+      "engines": {
+        "claude": "opus"
+      }
+    },
+    "fable": {
+      "score": 95,
+      "engines": {
+        "claude": "claude-fable-5-2"
+      }
+    },
+    "gpt-5.6-luna": {
+      "score": 45,
+      "engines": {
+        "codex": "gpt-5.6-luna"
+      }
+    },
+    "gpt-6-luna": {
+      "score": 55,
+      "engines": {
+        "codex": "gpt-6-luna"
+      }
+    },
+    "gpt-5.6-terra": {
+      "score": 65,
+      "engines": {
+        "codex": "gpt-5.6-terra"
+      }
+    },
+    "gpt-6.1-terra": {
+      "score": 72,
+      "engines": {
+        "codex": "gpt-6.1-terra"
+      }
+    },
+    "gpt-6.1-sol": {
+      "score": 82,
+      "engines": {
+        "codex": "gpt-6.1-sol"
+      }
+    },
+    "gpt-6-astra": {
+      "score": 88,
+      "engines": {
+        "codex": "gpt-6-astra"
+      }
+    }
+  },
+  "routing": {
+    "implementation": {
+      "trivial": {
+        "models": [
+          "haiku",
+          "gpt-6-luna",
+          "gpt-5.6-luna"
+        ],
+        "effort": "low"
+      },
+      "standard": {
+        "models": [
+          "sonnet",
+          "gpt-6.1-terra",
+          "gpt-5.6-terra"
+        ],
+        "effort": "medium"
+      },
+      "complex": {
+        "models": [
+          "sonnet",
+          "gpt-6.1-sol"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "opus"
+        ],
+        "effort": "high"
+      }
+    },
+    "review": {
+      "standard": {
+        "models": [
+          "sonnet",
+          "gpt-6.1-terra",
+          "opus",
+          "gpt-5.6-terra"
+        ],
+        "effort": "medium"
+      },
+      "complex": {
+        "models": [
+          "gpt-6.1-sol",
+          "opus",
+          "sonnet",
+          "gpt-6-luna"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "opus",
+          "gpt-6-astra",
+          "sonnet",
+          "gpt-6-luna"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "fable",
+          "gpt-6-astra"
+        ],
+        "effort": "ask"
+      }
+    },
+    "architecture": {
+      "trivial": {
+        "models": [
+          "opus",
+          "gpt-6-astra"
+        ],
+        "effort": "high"
+      },
+      "standard": {
+        "models": [
+          "opus",
+          "gpt-6-astra"
+        ],
+        "effort": "high"
+      },
+      "complex": {
+        "models": [
+          "opus",
+          "gpt-6-astra"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "opus",
+          "gpt-6-astra"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "fable",
+          "gpt-6-astra"
+        ],
+        "effort": "ask"
+      }
+    },
+    "scout": {
+      "standard": {
+        "models": [
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      }
+    },
+    "style_review": {
+      "standard": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      }
+    }
+  }
+}
