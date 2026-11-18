@@ -27,10 +27,18 @@ Steps:
        task: "<the task text>",
        timestamp: "<output of: date -u +%Y%m%dT%H%M%SZ>",
        plugin_root: "${CLAUDE_PLUGIN_ROOT}",
-       classification: <JSON from step 2>
+       classification: <JSON from step 2>,
+       permission_mode: "<mode>",
+       parent_task_id: "<parent task id>"
      }
    })
    ```
+
+   `permission_mode` is the mode shown on the hook context's supercritical line
+   (`--permission-mode <mode>`); omit it when unknown (the workflow treats missing as
+   `default`, auto mode off). Pass `parent_task_id` only when this task is a sub-task of a
+   supercritical parent: it lets the workflow inherit the parent's effort answer in auto
+   mode. Without them a supercritical run always stops for a human.
 
    If the Workflow tool is not available in this session, run the same steps inline
    instead, following the `cost-aware-orchestration` skill: route with
@@ -45,4 +53,5 @@ Steps:
 5. Save the returned JSON as `.claude/orchestrator/results/<task_id>.md` (a short
    summary followed by the JSON in a fenced block).
 6. Report the selected engine, model, effort, files changed, test results,
-   review findings, and any fallback event. If `requires_human_review` is true, say so first.
+   review findings, and any fallback event. If `requires_human_review` is true, say so first;
+   on a paused OpenRouter run (exit 43) show the run id and its resume/stop commands.
