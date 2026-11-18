@@ -81,7 +81,10 @@ Workflow:
     (`OPENROUTER_PAUSED <run-id>`, details in
     `.claude/orchestrator/openrouter-runs/<run-id>/paused.json`): tell the user and ask
     continue or stop (`openrouter_run.py --resume <run-id>` / `--stop <run-id>`); never retry
-    or fall back on 43 by yourself.
+    or fall back on 43 by yourself. On continue, run `--resume` with Bash `run_in_background`
+    (a foreground call times out and would stop the run). After it exits 0, finish the task:
+    run the tests, route the review with one `--implementation-model` per model that wrote
+    code (never one of them as reviewer), then the docs pass. Never relaunch the whole task.
 14. Never delegate authentication, permission, network, or ordinary tool errors as quota
     failures. Exit code 1 is an ordinary failure: report it.
 15. If all engines are constrained, stop fan-out and require human approval.

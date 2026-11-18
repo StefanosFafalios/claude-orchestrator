@@ -59,3 +59,15 @@ Steps:
 6. Report the selected engine, model, effort, files changed, test results,
    review findings, and any fallback event. If `requires_human_review` is true, say so first;
    on a paused OpenRouter run (exit 43) show the run id and its resume/stop commands.
+7. **Finishing after a pause (exit 43).** The workflow ends at the pause, so the code a
+   resumed run writes is untested and unreviewed. If the user chooses to continue, do not
+   relaunch the workflow with the original task (that redoes all of it). Instead:
+   - Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter_run.py" --resume <run-id>` with
+     Bash `run_in_background` and wait for its completion notice: a foreground call times
+     out after 2 minutes and would stop the run. It may pause again (43): ask again.
+   - After it exits 0, run the configured test command.
+   - Route the review with `route_engine.py --role review --task-route <route> --task-id
+     <task_id>` plus one `--implementation-model <model>` for every model that wrote code
+     (the paused run's model and any earlier implementer or fix model), then dispatch that
+     reviewer on the diff.
+   - Last, run `--role docs` as in the `cost-aware-orchestration` skill.
