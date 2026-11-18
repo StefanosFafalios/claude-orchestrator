@@ -9,9 +9,10 @@ implemented behavior; flag stale documentation rather than treating it as a requ
 ## Purpose
 
 `cost-aware-orchestrator` is a reusable Claude Code plugin. It routes work to the
-cheapest sufficient Claude model/effort, falls back between Claude and Codex on usage
-limits through resumable handoffs, and keeps review on a different engine when both
-are healthy. It must work in any project: no repository-specific paths, commands,
+cheapest sufficient model/effort across three engines (Claude, Codex and the optional
+OpenRouter), falls back between them on usage limits through resumable handoffs, and
+picks reviewers by capability: the best model for the tier, never weaker than the
+implementer and never the exact same model. It must work in any project: no repository-specific paths, commands,
 model names or credentials are hard-coded. Per-project settings live in the consuming
 project's `.claude/orchestrator.config.json`.
 
@@ -26,14 +27,20 @@ project's `.claude/orchestrator.config.json`.
 | `workflows/smart-task.js` | Workflow-tool script behind `/smart-task` |
 | `hooks/` | `UserPromptSubmit` policy injection, `PreToolUse` dispatch guardrail |
 | `scripts/` | deterministic Python routing/state/handoff logic and Bash CLI wrappers |
+| `.claude/skills/review-models/` | maintainer-only skill for reviewing routed models (not shipped) |
 | `templates/` | default config and handoff template |
 | `tests/` | offline pytest suite, including a Node harness for the workflow |
 
 `scripts/engine_state.py` owns config loading, state I/O and secret redaction; the
 other scripts and hooks import from it rather than re-implementing them.
+`scripts/model_map.py` resolves the model-centric capability map (`models`, `routing`).
+`scripts/openrouter_budget.py` derives spend caps and owns the OpenRouter key/model caches;
+`scripts/openrouter_run.py` runs OpenRouter models through Codex and supervises spend.
 `scripts/usage_sources.py` reads observed quota from local files only (Claude status line
 input, Codex session logs); `engine_state.sync_usage` applies it. Tests must isolate both
 sources (the autouse `usage_files` fixture) and never read the real `~/.claude` or `~/.codex`.
+OpenRouter caches are isolated with `ORCHESTRATOR_OPENROUTER_USAGE_FILE` and
+`ORCHESTRATOR_OPENROUTER_MODELS_FILE`; tests never touch the network.
 
 ## Platform constraints
 
@@ -48,8 +55,9 @@ sources (the autouse `usage_files` fixture) and never read the real `~/.claude` 
   network, and degrade to a notice instead of failing the prompt.
 - `additionalContext` must be nested in `hookSpecificOutput`. The dispatch guard emits
   only `deny`; compliant dispatches produce no output so user permission rules apply.
-- Wrapper exit code 42 means usage limit and nothing else. Auth, network, permission
-  and ordinary errors exit 1 and must never trigger a fallback.
+- Wrapper exit code 42 means usage limit and nothing else; 43 (OpenRouter runner only)
+  means paused awaiting the user's decision and never triggers a fallback. Auth, network,
+  permission and ordinary errors exit 1 and must never trigger a fallback.
 
 ## Coding standards
 

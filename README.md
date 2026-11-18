@@ -3,14 +3,17 @@
 A Claude Code plugin (`cost-aware-orchestrator`) that makes Claude Code spend tokens
 and quota deliberately:
 
-- **Cost-aware routing**: each task is classified as trivial, standard, complex or
-  critical by the main model using conversation context and a keyword safety floor, then routed to the
+- **Cost-aware routing**: each task is classified as trivial, standard, complex,
+  critical or supercritical by the main model using conversation context and a keyword safety floor, then routed to the
   cheapest sufficient Claude model and effort.
 - **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
   `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), and `codex-reviewer`.
-- **Optional Codex integration** through your locally installed Codex CLI.
-- **Bidirectional quota fallback**: when Claude is near or at its limit, the remaining
-  work goes to Codex, and vice versa. Review stays on the healthier engine.
+- **Three engines**: Claude, plus optional Codex (your local Codex CLI) and optional
+  OpenRouter (pay-per-token, under a yearly allowance you choose; off by default).
+- **Quota fallback**: when an engine is near or at its limit, the remaining work goes
+  to another usable engine.
+- **Capability-based review**: the reviewer is the best model for the task's tier, on
+  any engine, never weaker than the implementer and never the exact same model.
 - **Resumable handoffs**: the replacement engine gets a handoff listing completed work
   under `## Do not redo`, never the original broad prompt.
 - **Automatic activation**: on every prompt, a local hook injects a rubric, safety floor and
@@ -18,11 +21,12 @@ and quota deliberately:
   You don't need a slash command. Subagent reports are not re-classified.
   Written plans, including Superpowers plans, are routed per task during execution.
 
-- **Usage tracking**: reads remaining Claude and Codex quota from local files (status
-  line input, Codex session logs) and routes before an engine runs out.
+- **Usage tracking**: reads remaining Claude, Codex and OpenRouter quota from local
+  files (status line input, Codex session logs, OpenRouter spend cache) and routes before an engine runs out.
 
 No API keys, OAuth tokens or secrets are stored. Network access only happens through
-your local `claude` and `codex` CLIs.
+your local `claude` and `codex` CLIs and, when you enable OpenRouter, the OpenRouter
+runner, setup and status commands (hooks never use the network).
 
 ## How it works
 
@@ -32,34 +36,34 @@ safety floor. The model classifies using the rubric and conversation, then follo
 ```mermaid
 flowchart TD
     P[UserPromptSubmit hook<br/>routes + keyword safety floor] --> Q{Question?}
-    Q -- yes --> ANS[Answer directly<br/>no agents, no Codex]
+    Q -- yes --> ANS[Answer directly<br/>no agents, no other engine]
     Q -- no --> T{Model classifies<br/>rubric + safety floor}
     T -- trivial --> TRIV[Handle directly<br/>lowest effort, no review]
-    T -- standard / complex / critical --> ST[Read engine state<br/>Claude + Codex quota]
+    T -- standard / complex / critical / supercritical --> ST[Read engine state<br/>Claude, Codex, OpenRouter quota]
     ST --> R[route_engine.py<br/>engine + model + effort per tier]
     R --> NONE{Any engine<br/>available?}
     NONE -- no --> ASK[Stop and ask the user]
-    NONE -- "yes, both constrained" --> ATOM[One atomic task only<br/>human review required]
-    NONE -- yes --> PRE[complex: scout, architect if unclear<br/>critical: scout + architect required]
+    NONE -- "yes, all constrained" --> ATOM[One atomic task only<br/>human review required]
+    NONE -- yes --> PRE[complex: scout, architect if unclear<br/>critical: scout + architect required<br/>supercritical: top model plans, you pick its effort]
     ATOM --> IMPL
     PRE --> IMPL{Implementation<br/>engine}
     IMPL -- Claude --> CI[implementer agent<br/>may re-tier up/down once]
-    IMPL -- Codex --> CX[write_handoff.py, then<br/>codex_with_fallback.sh]
+    IMPL -- "Codex / OpenRouter" --> CX[write_handoff.py, then<br/>codex_with_fallback.sh or openrouter_run.py]
     CI -. "re-tier (handoff keeps done work;<br/>critical never downgrades)" .-> R
-    CI --> X{"Usage limit (exit 42)?"}
+    CI --> X{"Usage limit (exit 42)?<br/>exit 43 = paused, ask you"}
     CX --> X
-    X -- yes --> FB{Other engine<br/>allowed and has attempts?}
+    X -- yes --> FB{Another engine<br/>allowed and has attempts?}
     FB -- no --> ASK
     FB -- yes --> LIM[Mark engine limited<br/>hand remaining work over<br/>handoff: Do not redo]
     LIM --> TEST
     X -- no --> TEST{Test command<br/>configured?}
     TEST -- no --> REV
     TEST -- yes --> OK{Pass?}
-    OK -- no --> FIX[One fix pass, same engine<br/>then other engine / higher tier<br/>then stop and ask]
+    OK -- no --> FIX[One fix pass, same engine<br/>then another engine / higher tier<br/>then stop and ask]
     FIX --> OK
     OK -- yes --> REV
     subgraph REV [Parallel review]
-        MR[Main review: codex-reviewer or verifier<br/>other engine when both healthy]
+        MR[Main review: best model for the tier<br/>never weaker than implementer, never the same model]
         SR[style-reviewer, haiku<br/>skipped if Claude constrained<br/>or review.split is false]
     end
     REV --> DONE[Report result]
@@ -71,6 +75,7 @@ flowchart TD
   account has it; otherwise it runs the same steps inline with regular subagents.
 - `python3` (3.11+ recommended; the scripts also run on 3.8+), `bash`, `git`
 - Optional: the [Codex CLI](https://github.com/openai/codex), logged in (`codex login`)
+- Optional: an [OpenRouter](https://openrouter.ai) account and API key (also needs the Codex CLI)
 
 ## Installation
 
@@ -98,7 +103,8 @@ CLAUDE.md point to it. The root defaults to `docs/AI_CONTEXT.md` (override with
 `--common-file PATH`); nested instruction files use a local `AI_CONTEXT.md`. Setup
 asks before applying changes and offers to review merged instructions for duplicates.
 
-Setup can also show live Codex activity in the Claude Code status line.
+Setup can also show live Codex activity in the Claude Code status line, and offers
+OpenRouter (see [OpenRouter](#openrouter)).
 
 **Codex** is optional. If the `codex` CLI is installed and logged in (`codex login`), the
 plugin uses it with no further configuration. Without it, set
@@ -110,6 +116,7 @@ Routing uses real quota numbers when they are available locally (no network):
 
 | Engine | Source |
 |---|---|
+| OpenRouter | the spend cache written by `openrouter_budget.py` and the runner (`/api/v1/key`), paced against your caps |
 | Codex | the newest session log in `~/.codex/sessions/` (`rate_limits`: 5-hour and weekly windows) |
 | Claude | `~/.claude/statusline-input.json`, saved by your status line (`rate_limits.five_hour` / `seven_day`) |
 
@@ -165,37 +172,43 @@ Without a command, the policy still applies:
 
 ## Routing policy
 
-| Route | Examples | Claude tier | Codex equivalent | Codex may implement |
-|---|---|---|---|---|
-| trivial | typo, rename, lookup | haiku / low | `gpt-6-luna` / low | yes (inline on Claude by default) |
-| standard | feature, tests, docs | sonnet / medium | `gpt-6.1-terra` / medium | yes |
-| complex | debugging, multi-file | sonnet / high, escalate to opus | `gpt-6.1-sol` / high | yes |
-| critical | production, security, migrations, auth/payment | opus / high | `gpt-6-astra` / high (review only) | **no**: stays on Claude |
+Routing is driven by a **capability map** (see [Capability map](#capability-map)). The
+tiers and their default shape:
 
-Codex model settings may be a string or a preference list; when Codex's local model
-cache is available, the first listed model offered by the user's plan wins.
+| Route | Examples | Implements on | Notes |
+|---|---|---|---|
+| trivial | typo, rename, lookup | cheapest sufficient model, low effort | inline on Claude by default |
+| standard | feature, tests, docs | mid-size model, medium effort | |
+| complex | debugging, multi-file | mid-size model, high effort | may escalate a tier |
+| critical | production, security, migrations, auth/payment | strongest implementing model, high effort | architect plan required; stays on Claude by default |
+| supercritical | problems beyond known solutions, novel algorithms, root causes that beat a critical attempt | never (see below) | top model plans, maps tasks and reviews |
 
-**Adaptive split.** When both engines are healthy, standard and complex tasks are
+Model settings may be a string or a preference list; the first model the engine can
+serve wins (for Codex, from its local model cache; for OpenRouter, from the cached
+`/models` list).
+
+**Adaptive split.** When several engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit
 line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
-one subscription gets closer to its limit, more work goes to the other. The choice is a
+one engine gets closer to its limit, more work goes to the others. The choice is a
 deterministic hash of the prompt and session, so the same prompt in a session routes the same way.
 
 **Re-tiering.** The model chooses the initial route; the Haiku scout or the
 implementer may correct it once per task (never below the safety floor; critical is never downgraded).
 
-**Cross-engine review.** Review always runs on the engine that did not implement, when
-it is healthy: Claude work is reviewed by Codex, and Codex work by Claude.
-The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
+**Capability-based review.** The reviewer is the best model for the task's tier from the
+map, on whichever engine can serve it. It is never weaker than the implementer, and if
+the pick is the exact same model that implemented (on any engine), the next-best
+comparable model reviews instead. The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
 covers standards, best practices and code/text reduction (set `review.split` to false to merge them).
 
 **Test gate.** If the project's tests fail, the same engine gets one fix pass with only
-the failing output. If they still fail, the other engine (or one Claude tier up) gets
+the failing output. If they still fail, another engine (or one Claude tier up) gets
 one try, then it stops and asks you.
 
-When an engine is constrained (near limit or limited), its work goes to the other
-engine at the equivalent tier, unless that tier's `implement` switch is off. When both
-are constrained, the engine with more remaining quota does one atomic task and a human
+When an engine is constrained (near limit or limited), its work goes to another usable
+engine at the equivalent tier, unless that tier's `implement` switch is off. When all
+are constrained, the engine with the most remaining quota does one atomic task and a human
 reviews. Full table:
 [`skills/cost-aware-orchestration/references/routing-policy.md`](skills/cost-aware-orchestration/references/routing-policy.md).
 
@@ -203,28 +216,88 @@ Tune it per project:
 
 ```json
 {
-  "codex": { "tiers": { "standard": { "model": "gpt-6.1-sol", "effort": "medium", "implement": true } } },
+  "routing": { "implementation": { "standard": { "models": ["sonnet"], "effort": "medium" } } },
   "balance": { "mode": "adaptive", "routes": ["standard", "complex"] }
 }
 ```
 
-Set `"balance": {"mode": "off"}` to keep Claude as the primary engine, so Codex works
-only as a fallback and reviewer.
+Existing `defaults` and `codex.tiers` keys still work as overrides. Set
+`"balance": {"mode": "off"}` to keep Claude as the primary engine, so the others work
+only as fallbacks and reviewers.
+
+## Supercritical tier
+
+For work that needs the best available reasoning rather than more size: problems beyond
+current state of the art, novel algorithms or proofs, root causes that defeated a critical
+attempt. It is chosen by the model's classification, your explicit request, or a re-tier
+after a failed critical attempt (there is no keyword floor).
+
+- The top model **reasons, maps the work into tasks and reviews. It never implements**:
+  each planned task is implemented on its own tier, at most `critical`.
+- **You choose its effort** before it first runs on a task (it is costly, so there is no
+  maximum-effort default). In auto mode, the answer is asked once and carried to
+  supercritical child tasks; otherwise every supercritical task asks. A headless run in
+  auto mode inherits an ancestor's answer or uses `medium`; headless without auto mode
+  stops for human review. If the permission mode cannot be read, auto mode counts as off.
+- It keeps critical's safeguards: architect required, never downgraded, human review when
+  engines are constrained.
+
+## Capability map
+
+The default `models` catalog lists each canonical model once, with its name per engine
+(for example the Claude alias and the OpenRouter slug for the same model), capability
+scores with source and date, and prices. The `routing` section ranks models per role
+(implementation, review, scout, style review, architecture) and tier, with effort and an
+`implement` switch. Every listed model clears that tier's bar, so work is split by
+headroom across the engines that can serve one. Because identity is per model, not per
+engine, "same model" and "at least as capable" are decided correctly across engines.
+Override any row in your project config. The shipped defaults are a starting point, not a
+requirement. Maintainers refresh them with the repo-only `review-models` skill
+(`.claude/skills/review-models/`), which is not shipped with the plugin.
+
+## OpenRouter
+
+OpenRouter is an optional pay-per-token engine, **off by default**. Without it, behavior
+is the same as before. It is enabled when `engines.openrouter` is `true` and the key
+environment variable (default `OPENROUTER_API_KEY`, configurable as `openrouter.key_env`)
+is non-empty. When enabled it takes a share of work like any healthy engine.
+
+**Setup.** Run `/cost-aware-orchestrator:setup` and accept the OpenRouter step. It walks
+you through creating a key on the OpenRouter site, setting the key's credit limit, and
+verifying it. Store the key in your shell profile (`export OPENROUTER_API_KEY=...`),
+**never in the project, config, state or chat**.
+
+**Yearly allowance to caps.** You give a yearly USD allowance; setup derives the monthly
+cap (yearly / 12, the hard limit on the key), a weekly cap (2x the average week) and a
+daily cap (3x the average day) and writes them to the project config. They allow bursts
+while the monthly cap keeps the year within budget. The router also paces spend against
+the month so the allowance is spread out: ahead of pace makes OpenRouter `near_limit`
+(deprioritized), and only a spent cap makes it `limited`. Inspect or refresh with
+`python3 scripts/openrouter_budget.py caps|verify|refresh`.
+
+**Pause, resume, stop.** `scripts/openrouter_run.py` runs OpenRouter models through the
+Codex CLI (your own Codex config is untouched) and polls spend while a run is active. A
+spent budget exits **42** (limit, normal fallback). If the daily or weekly cap is exceeded
+mid-run, the run is suspended, not killed, and exits **43** ("paused, awaiting your
+decision"); you are asked to continue or stop. `openrouter_run.py --resume RUN_ID`
+continues it, `--stop RUN_ID` ends it and the remaining work goes through the normal
+handoff. A request already in flight when the pause happens still completes and bills.
 
 ## Fallback behavior
 
-1. `scripts/claude_with_fallback.sh` and `scripts/codex_with_fallback.sh` exit **42**
-   only on usage-limit messages (`usage limit`, `hit your session/weekly limit`,
+1. `scripts/claude_with_fallback.sh`, `scripts/codex_with_fallback.sh` and
+   `scripts/openrouter_run.py` exit **42** only on usage-limit messages (`usage limit`, `hit your session/weekly limit`,
    `limit reached`, and `resets`/`upgrade` when no auth or network error is present).
    Authentication, permission, network and ordinary errors exit 1 and are never handed off.
+   Exit **43** (OpenRouter only) means paused awaiting your decision, never a fallback.
 2. On 42, the engine is marked `limited` in `.claude/engine-state.json`. A handoff is
    written to `.claude/orchestrator/handoffs/<task-id>.md` (objective, completed and
    remaining work, diff, failing tests, project commands, constraints, output contract).
-   Only the remaining work goes to the other engine.
+   Only the remaining work goes to another usable engine.
    `claude_with_fallback.sh` runs Claude with `--permission-mode acceptEdits` by default
    (edits allowed, shell commands such as tests need approval). Set
    `CLAUDE_PERMISSION_MODE` to change it.
-3. Each engine is tried at most once per task. If both hit limits, orchestration stops
+3. Each engine is tried at most once per task. If all hit limits, orchestration stops
    and asks you.
 4. To resume an interrupted run, relaunch the workflow with `resumeFromRunId`, or pass
    the saved handoff (`handoff: ".claude/orchestrator/handoffs/<id>.md"`).
@@ -247,12 +320,13 @@ If Codex reports a usage limit mid-task, write a handoff with
 
 ## Security rules
 
-- No credentials, tokens or user-specific config in the repository or in state.
+- No credentials, tokens or user-specific config in the repository or in state. The
+  OpenRouter key lives only in your shell environment and is never put on a command line.
 - Error messages, diffs and test output are scrubbed of credential-shaped strings
   before they are persisted or handed off.
 - Delegated Codex runs default to `--sandbox read-only`. Only implementation uses
   `workspace-write`.
-- Hooks read local files only and never call `claude`, `codex` or the network.
+- Hooks read local files only and never call `claude`, `codex`, OpenRouter or the network.
 - The dispatch guard only *denies*. It never auto-approves, so your permission rules
   still apply.
 - All engines follow
@@ -277,11 +351,12 @@ Models and efforts are overridable the same way under `defaults`, e.g.
 ```
 
 All routing then stays on Claude. To keep Codex for review only, set
-`"fallback": {"claude_to_codex": false}`. To turn off automatic orchestration (the hook
+`"fallback": {"claude_to_codex": false}`. OpenRouter is disabled the same way (`"engines": {"openrouter": false}`, the default).
+To turn off automatic orchestration (the hook
 then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
 
 ```json
-{ "engines": { "claude": false, "codex": false }, "automatic": false }
+{ "engines": { "claude": false, "codex": false, "openrouter": false }, "automatic": false }
 ```
 
 ## Troubleshooting
@@ -292,6 +367,8 @@ then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
 | Stuck on Codex after the Claude quota reset | `/cost-aware-orchestrator:reset-engine-state`, or `engine_state.py set --engine claude --remaining-pct 100` |
 | Dispatch denied by `[cost-aware-orchestrator]` | Follow the reason, or add a `Justification:` line for a standard task that needs the architect |
 | Codex wrapper exits 1 with "not logged in" | Run `codex login`. This is not a quota failure, so there is no fallback |
+| OpenRouter never used | Needs `engines.openrouter: true` and a non-empty key variable in the shell that launched Claude Code (restart it after editing your profile) |
+| Run exits 43 | Over a daily/weekly cap mid-run: `openrouter_run.py --resume RUN_ID` or `--stop RUN_ID` |
 | Hook seems silent | Check `claude --debug`. The hook prints JSON with `hookSpecificOutput.additionalContext` |
 
 ## Running tests
@@ -302,7 +379,8 @@ ruff check .
 shellcheck scripts/*.sh     # if installed
 ```
 
-The tests never invoke the real `claude` or `codex`. The wrappers are exercised with
+The tests never invoke the real `claude`, `codex` or OpenRouter (the OpenRouter caches are
+isolated by env vars and nothing touches the network). The wrappers are exercised with
 fake CLIs, and `workflows/smart-task.js` runs under `tests/workflow_harness.mjs` with
 mocked agents.
 
