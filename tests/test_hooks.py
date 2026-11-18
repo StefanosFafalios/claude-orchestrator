@@ -222,6 +222,14 @@ def test_openrouter_shown_when_enabled(project, write_config, monkeypatch):
     assert "openrouter=healthy(100%)" in text
 
 
+def test_openrouter_without_budget_gets_a_notice(project, write_config, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    write_config({"engines": {"openrouter": True}})
+    assert "OpenRouter has no monthly budget" in context(project, "add a button")
+    write_config({"engines": {"openrouter": True}, "openrouter": {"budget": {"monthly_usd": 20}}})
+    assert "OpenRouter has no monthly budget" not in context(project, "add a button")
+
+
 def test_supercritical_row_and_effort_line(project, write_config, monkeypatch):
     write_config({"engines": {"openrouter": True}})
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
@@ -262,6 +270,8 @@ def test_openrouter_review_row_and_run_line(project, write_config, monkeypatch):
     text = context(project, "add a button")
     assert "codex-reviewer[OpenRouter]/vendor/model/medium" in text
     assert "openrouter_run.py <handoff>; exit 43" in text
+    run_line = next(line for line in text.splitlines() if line.startswith("OpenRouter: "))
+    assert "OPENROUTER_SANDBOX=workspace-write (read-only for scout/style)" in run_line
     assert "codex_with_fallback.sh" not in text and "Rows marked [OpenRouter]" not in text
 
 
@@ -281,6 +291,8 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
     assert "Rubric: trivial =" in text
     decider_line = next(line for line in text.splitlines() if "decide_route.py" in line)
     assert "its route is a floor, raise it from context" in decider_line and "Approvals (yes) keep" in decider_line
+    # The model never quotes user text into a shell: the prompt goes through a file.
+    assert "with Write" in decider_line and "--prompt-file" in decider_line and "stdin" not in decider_line
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     text = context(project, "add a button")
     assert "decide_route.py" not in text

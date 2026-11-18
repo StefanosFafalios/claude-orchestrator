@@ -14,7 +14,7 @@ Steps:
    yes copy it from `${CLAUDE_PLUGIN_ROOT}/templates/orchestrator.config.json`
    (on no, continue with plugin defaults). Do not modify files outside `.claude/`.
 2. Classify the task once and pass the result as `classification: {"route": "<tier>",
-   "reason": "<why>"}`. If the hook context told you to pipe the prompt to `decide_route.py`,
+   "reason": "<why>"}`. If the hook context told you to run `decide_route.py --prompt-file`,
    use that run (do not run it again): its route is a floor you raise from the conversation
    when warranted, never lower. Otherwise, or on its exit 3, classify by the hook rubric with
    the whole conversation, never below the keyword floor. (Callers that pass no

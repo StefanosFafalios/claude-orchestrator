@@ -28,7 +28,8 @@ Workflow:
    outside `.claude/`. On no, continue with plugin defaults.
 2. Classify using the full conversation and the hook rubric; the hook supplies per-tier
    routes and a keyword safety floor. Never choose below the floor. When the hook says to,
-   pipe the prompt to `decide_route.py` first: its route is a floor you may raise from the
+   save the prompt to a file with the Write tool and run `decide_route.py --prompt-file <file>`
+   first (never quote prompt text into a shell): its route is a floor you may raise from the
    conversation, never lower; approvals keep the approved tier; on exit 3 classify yourself.
 3. Check engine state:
    python3 "<scripts>/engine_state.py" status
