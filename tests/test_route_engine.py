@@ -251,3 +251,39 @@ def test_adaptive_split_is_deterministic_and_scoped(config):
 def test_adaptive_split_can_be_turned_off(write_config):
     write_config({"balance": {"mode": "off"}})
     assert split(load_config(), state(claude_pct=30, codex_pct=100)) == 0
+
+
+def test_supercritical_asks_interactively(config):
+    assert route("review", "supercritical", config, state(), "t1")["effort"] == "ask"
+
+
+def test_recorded_effort_wins(config):
+    s = {**state(), "supercritical_efforts": {"t1": "max"}}
+    assert route("review", "supercritical", config, s, "t1", permission_mode="auto")["effort"] == "max"
+
+
+def test_auto_mode_inherits_parent(config):
+    s = {**state(), "supercritical_efforts": {"p": "xhigh"}}
+    r = route("review", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="auto")
+    assert r["effort"] == "xhigh"
+
+
+def test_manual_mode_does_not_inherit(config):
+    s = {**state(), "supercritical_efforts": {"p": "xhigh"}}
+    r = route("review", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="default")
+    assert r["effort"] == "ask"
+
+
+def test_headless_auto_defaults_medium(config):
+    r = route("review", "supercritical", config, state(), "t2", permission_mode="auto", headless=True)
+    assert (r["effort"], r["requires_human_review"]) == ("medium", False)
+
+
+def test_headless_manual_needs_human(config):
+    r = route("architecture", "supercritical", config, state(), "t2", headless=True)
+    assert r["effort"] == "" and r["requires_human_review"] is True and r["engine"] != "none"
+    assert "human must choose" in r["reason"]
+
+
+def test_supercritical_architect_is_top_model(config):
+    assert route("architecture", "supercritical", config, state(), "t1")["canonical_model"] == "fable"

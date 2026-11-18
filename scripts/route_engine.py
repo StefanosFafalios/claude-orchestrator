@@ -120,13 +120,36 @@ def _implementer(config: dict, name: str) -> str | None:
     return next((m for m in (model_map.canonical(config, e, name) for e in ENGINES) if m), None)
 
 
+def supercritical_effort(state: dict, task_key: str | None, parent_task_id: str | None,
+                         permission_mode: str | None, headless: bool) -> tuple[str, bool]:
+    """Effort for an ``ask`` row as ``(effort, requires_human_review)``."""
+    efforts = state.get("supercritical_efforts", {})
+    if task_key and task_key in efforts:
+        return efforts[task_key], False
+    auto = permission_mode == "auto"
+    if auto and parent_task_id and parent_task_id in efforts:
+        return efforts[parent_task_id], False
+    if headless:
+        return ("medium", False) if auto else ("", True)
+    return "ask", False
+
+
+def _need_human(result: dict, human: bool) -> dict:
+    if human and result["engine"] != "none":
+        result["requires_human_review"] = True
+        result["reason"] += "; a human must choose the supercritical effort"
+    return result
+
+
 def route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
           implementation_model: str | None = None, exclude: tuple = (), parent_task_id: str | None = None,
           permission_mode: str | None = None, headless: bool = False) -> dict:
     """``implementation_model`` ``"auto"`` derives the implementer from ``task_key``."""
-    # parent_task_id, permission_mode and headless are reserved for supercritical effort handling.
     engines = Engines(config, state)
-    entry = model_map.row(config, role, task_route)
+    entry = dict(model_map.row(config, role, task_route))
+    human = False
+    if entry["effort"] == "ask":
+        entry["effort"], human = supercritical_effort(state, task_key, parent_task_id, permission_mode, headless)
     models = list(entry["models"])
     if role == "implementation":
         return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"])
@@ -143,7 +166,7 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
             if result["engine"] != "none":
                 result["requires_human_review"] = True
                 result["reason"] += "; no reviewer at least as capable as the implementer"
-        return result
+        return _need_human(result, human)
     result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"])
     if role == "style_review":
         # Skipping style review never needs a human: the main review covers it.
@@ -151,7 +174,7 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
             return _none("covered by the main review", human=False)
         if result["engine"] == "none" or engines.status[result["engine"]] != "healthy":
             return _none("both engines constrained; main review covers style", human=False)
-    return result
+    return _need_human(result, human)
 
 
 def main(argv: list[str] | None = None) -> int:
