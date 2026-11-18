@@ -90,8 +90,8 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--prompt-file", help="file containing the prompt (default: stdin)")
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         if args.prompt_file:
             with open(args.prompt_file, encoding="utf-8") as handle:
                 prompt = handle.read()
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
             prompt = sys.stdin.read()
         config = load_config()
         result = decide(prompt, config, load_synced_state(config))
-    except Exception as exc:  # noqa: BLE001 - advisory: every failure hands classification back
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - advisory: every failure (even a bad flag) hands classification back
         print(f"fallback: session model classifies ({redact(str(exc))[:300]})", file=sys.stderr)
         return 3
     print(json.dumps(result))

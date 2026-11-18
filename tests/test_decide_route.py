@@ -112,6 +112,11 @@ def test_timeout_falls_back(project, write_config, monkeypatch, fake_openrouter,
     assert "fallback" in capsys.readouterr().err
 
 
+def test_bad_flag_falls_back(capsys):
+    assert decide_route.main(["--nope"]) == 3
+    assert "fallback" in capsys.readouterr().err
+
+
 def test_prompt_is_redacted_and_key_only_in_header(project, write_config, monkeypatch, fake_openrouter):
     enable_decider(write_config, monkeypatch)
     secret = "sk-proj-abcdefghijklmnopqrstuvwxyz"

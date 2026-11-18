@@ -132,7 +132,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     task_key = hashlib.sha256((prompt + "\0" + session_id).encode("utf-8")).hexdigest()[:16]
     # Same length budget either way: the hook output is close to its cap.
     lines = [
-        "Pipe this prompt to decide_route.py (stdin), use its route; exit 3: classify by rubric and conversation. State `route=<tier>: <reason>`, follow that row. Approvals (yes) keep the approved tier, never lower."
+        "Pipe this prompt to decide_route.py (stdin): its route is a floor, raise it from context; exit 3: use the rubric. State `route=<tier>: <reason>`, follow that row. Approvals (yes) keep the approved tier."
         if decider_usable(config, state) else
         "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, then follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
         f"Rubric: {RUBRIC}",

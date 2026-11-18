@@ -278,8 +278,9 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
     enable_decider(write_config, monkeypatch)
     text = context(project, "add a button")
     assert "decide_route.py" in text and "Classify this prompt using" not in text
-    assert "Rubric: trivial =" in text and "never lower" in text
+    assert "Rubric: trivial =" in text
     decider_line = next(line for line in text.splitlines() if "decide_route.py" in line)
+    assert "its route is a floor, raise it from context" in decider_line and "Approvals (yes) keep" in decider_line
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     text = context(project, "add a button")
     assert "decide_route.py" not in text

@@ -13,10 +13,12 @@ Steps:
    "Create .claude/orchestrator.config.json with default orchestration settings?" and on
    yes copy it from `${CLAUDE_PLUGIN_ROOT}/templates/orchestrator.config.json`
    (on no, continue with plugin defaults). Do not modify files outside `.claude/`.
-2. Classify the task. If the hook context told you to pipe the prompt to `decide_route.py`,
-   omit `classification` in step 4: the workflow runs the cheap decider and falls back to the
-   keyword classifier on exit 3. Otherwise classify it yourself by the hook rubric with the whole
-   conversation, never below its keyword floor, and pass `{"route": "<tier>", "reason": "<why>"}`.
+2. Classify the task once and pass the result as `classification: {"route": "<tier>",
+   "reason": "<why>"}`. If the hook context told you to pipe the prompt to `decide_route.py`,
+   use that run (do not run it again): its route is a floor you raise from the conversation
+   when warranted, never lower. Otherwise, or on its exit 3, classify by the hook rubric with
+   the whole conversation, never below the keyword floor. (Callers that pass no
+   `classification` get the workflow's own decider, then the keyword classifier.)
 3. Check engine state: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status`.
    If it exits 2 (invalid config), report the error and stop.
 4. Run the workflow. Call it by name; if the tool does not know the name, pass
@@ -29,7 +31,7 @@ Steps:
        task: "<the task text>",
        timestamp: "<output of: date -u +%Y%m%dT%H%M%SZ>",
        plugin_root: "${CLAUDE_PLUGIN_ROOT}",
-       classification: <JSON from step 2, or omitted for the decider>,
+       classification: <JSON from step 2>,
        permission_mode: "<mode>",
        parent_task_id: "<parent task id>"
      }
