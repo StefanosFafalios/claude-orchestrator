@@ -38,12 +38,22 @@
   },
   "engines": {
     "claude": true,
-    "codex": true
+    "codex": true,
+    "openrouter": false
   },
   "fallback": {
     "claude_to_codex": true,
     "codex_to_claude": true,
     "require_human_review_when_both_limited": true
+  },
+  "openrouter": {
+    "key_env": "OPENROUTER_API_KEY",
+    "budget": {
+      "yearly_usd": 0,
+      "monthly_usd": 0,
+      "weekly_usd": 0,
+      "daily_usd": 0
+    }
   },
   "codex": {
     "default_model": [
