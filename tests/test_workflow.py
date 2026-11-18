@@ -173,6 +173,16 @@ def test_doc_updater_runs_on_openrouter_with_agent_rules(repo, write_config, mon
     assert out["result"]["docs"] == {"engine": "openrouter", "changed": False, "files": []}
 
 
+def test_out_of_scope_docs_edit_needs_human_review(repo, write_config, monkeypatch, fake_openrouter):
+    """The docs pass runs after review: an edit outside the AI-doc scope would otherwise land unreviewed."""
+    openrouter_docs(write_config, monkeypatch)
+    agents = dict(SCOUT_AGENTS, **{"implement:claude": dict(DONE, files_changed=["parser.py"])})
+    out = run(repo, {"task": "add unit tests for parser", "agents": agents})
+    result = out["result"]
+    assert result["docs"]["out_of_scope"] == ["app.py"], "the fake engine wrote app.py, which is code"
+    assert result["requires_human_review"] is True
+
+
 def test_doc_updater_usage_limit_reroutes_to_claude(repo, write_config, monkeypatch, fake_openrouter):
     fake_openrouter.key_data["limit_remaining"] = 0  # the runner refuses with exit 42
     openrouter_docs(write_config, monkeypatch)

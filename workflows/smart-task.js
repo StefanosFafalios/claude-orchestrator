@@ -189,6 +189,9 @@ Rules:
 - Never commit.
 
 Return JSON: \`{"changed": true|false, "files": [edited paths], "reason": "one line"}\`.`
+// The scope above as paths. ponytail: plugin skill/agent/command docs count in any project (the workflow
+// cannot see whether the project is the plugin); check .claude-plugin/plugin.json if that matters.
+const DOC_SCOPE = /(^|\/)(AI_CONTEXT|CLAUDE|AGENTS)\.md$|^\.claude\/(skills\/.+\/SKILL|agents\/[^/]+)\.md$|^(skills|agents|commands)\/.+\.md$/
 
 // ---------------------------------------------------------------------------
 phase('Classify')
@@ -741,6 +744,15 @@ async function docsPass() {
       // Without the JSON, report files the docs pass added to the diff.
       const files = d && Array.isArray(d.files) ? d.files : w.files.filter(f => !changed.includes(f))
       docs = { engine: dr.engine, changed: d ? Boolean(d.changed) : files.length > 0, files }
+      // The scope is enforced only by the prompt and the docs pass runs after review: any reported or
+      // newly changed file outside it needs a human.
+      const outside = [...new Set([...files, ...w.files.filter(f => !changed.includes(f))])]
+        .map(f => String(f).replace(/^\.\//, '')).filter(f => !DOC_SCOPE.test(f))
+      if (outside.length) {
+        docs.out_of_scope = outside
+        requiresHumanReview = true
+        log(`docs pass changed files outside its scope: ${outside.join(', ')}; human review required`)
+      }
       return
     }
     await markLimit(dr.engine, 'Docs')
