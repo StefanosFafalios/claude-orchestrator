@@ -92,10 +92,16 @@ def _read_json(path: Path) -> dict:
 
 def load_config(root: Path | None = None) -> dict:
     """Plugin defaults overlaid by the project's ``.claude/orchestrator.config.json``."""
+    import model_map  # imported here: model_map imports ConfigError from this module
+
     config = _read_json(DEFAULT_CONFIG_PATH)
     path = config_path(root)
+    project_raw: dict = {}
     if path.is_file():
-        config = deep_merge(config, _read_json(path))
+        project_raw = _read_json(path)
+        config = deep_merge(config, project_raw)
+    config["legacy_keys"] = model_map.legacy_keys(project_raw)
+    model_map.validate(config)
     config.setdefault("automatic", True)
     config.setdefault("usage_sync", True)
     return config
