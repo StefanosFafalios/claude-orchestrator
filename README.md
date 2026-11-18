@@ -34,6 +34,9 @@ runner, setup and status commands (hooks never use the network).
 
 On every prompt a local hook reads quota state and supplies per-tier routes and a keyword
 safety floor. The model classifies using the rubric and conversation, then follows the selected route.
+With OpenRouter set up, healthy and within budget, the hook instead has the model pipe the prompt
+to `decide_route.py`: one cheap OpenRouter call (the `routing.decider` row) picks the tier, never
+below the keyword floor. Any failure (exit 3) hands classification back to the session model.
 
 ```mermaid
 flowchart TD

@@ -9,7 +9,7 @@ Maintainer-only (lives in this repo's `.claude/skills/`, not shipped). Updates t
 map in `templates/orchestrator.config.json`:
 
 - `models`: canonical model id -> `{score, engines: {claude|codex|openrouter: name}}`
-- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`) ->
+- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`, `decider`) ->
   route (`trivial`, `standard`, `complex`, `critical`, `supercritical`) ->
   `{models: [ranked ids], effort}`. Supercritical effort is `"ask"`. `implementation.supercritical`
   reuses the critical row: top models never implement.
@@ -53,6 +53,10 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   other row: their effort is always asked from the user because they are expensive.
 - `docs` (the end-of-task doc updater) follows the `style_review` rule: the same models and
   effort, cheapest-first, `low`. A config without `routing.docs` routes on `style_review`.
+- `decider` (the cheap tier classifier) has a single `standard` row: the cheapest models
+  that reliably return tool-free JSON, score bar about the trivial implementation bar,
+  cheapest-first, effort `low`. Only its OpenRouter names are used; a config without
+  `routing.decider` has no decider.
 - Trivial tasks get no scout and no model review: there are no `review`, `style_review`,
   `scout` or `docs` rows for `trivial` (`model_map.UNUSED`).
 - The same canonical model on several engines is one `models` entry with several `engines`

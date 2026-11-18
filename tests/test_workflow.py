@@ -534,3 +534,18 @@ def test_long_task_id_is_replaced(repo):
     out = run(repo, {"task": "fix typo in README", "args": {"task_id": "a" * 65},
                      "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
     assert out["result"]["task_id"].startswith("fix-typo-in-readme-")
+
+
+def test_workflow_uses_decider_route_and_falls_back_to_keywords(repo, write_config, monkeypatch, fake_openrouter):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch, balance={"mode": "off"})
+    fake_openrouter.chat_body = fake_openrouter.answer('{"route": "trivial", "reason": "tiny"}')
+    out = run(repo, {"task": "add unit tests for parser", "agents": {"implement:claude": DONE}})
+    assert out["result"]["route"] == "trivial", "the decider's route wins over the keyword standard"
+    assert "decide_route.py" in next(c for c in out["calls"] if c["label"] == "classify")["command"]
+    fake_openrouter.chat_status = 500
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "standard", "exit 3 falls back to the keyword classifier"
+    calls = len(fake_openrouter.chat_requests)
+    out = run(repo, {"task": "add unit tests for parser", "args": {"decider": False}, "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "standard" and len(fake_openrouter.chat_requests) == calls

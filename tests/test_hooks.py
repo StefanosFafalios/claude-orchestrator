@@ -271,3 +271,17 @@ def test_openrouter_implementation_row_delegates(project, write_config, monkeypa
     assert "implement=[OpenRouter] OpenRouter/vendor/model/medium" in text
     assert "Rows marked [OpenRouter] implement on OpenRouter: delegate" in text
     assert "openrouter_run.py <handoff>" in text
+
+
+def test_decider_line_replaces_classify_line_only_when_usable(project, write_config, monkeypatch):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch)
+    text = context(project, "add a button")
+    assert "decide_route.py" in text and "Classify this prompt using" not in text
+    assert "Rubric: trivial =" in text and "never lower" in text
+    decider_line = next(line for line in text.splitlines() if "decide_route.py" in line)
+    (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
+    text = context(project, "add a button")
+    assert "decide_route.py" not in text
+    classify_line = next(line for line in text.splitlines() if line.startswith("Classify this prompt using"))
+    assert len(decider_line) <= len(classify_line), "the hook output is near its cap"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from engine_state import ConfigError
 
-ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs")
+ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs", "decider")
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
 LEGACY_KEYS = ("defaults", "codex.tiers", "codex.default_model")
 ASK_ALLOWED = {("review", "supercritical"), ("architecture", "supercritical")}
@@ -35,12 +35,13 @@ def validate(config: dict) -> None:
     if not isinstance(models, dict) or not isinstance(routing, dict):
         raise ConfigError("config needs 'models' and 'routing' objects")
     for role in ROLES:
-        if role == "docs" and role not in routing:
-            continue  # configs from before the docs role: row() uses style_review
+        if role in ("docs", "decider") and role not in routing:
+            continue  # configs from before these roles: docs uses style_review, the decider is off
         rows = routing.get(role)
         if not isinstance(rows, dict):
             raise ConfigError(f"routing.{role} is missing")
-        for route_name in ROUTES:
+        # The decider classifies before any route is known: it has one row, ``standard``.
+        for route_name in ("standard",) if role == "decider" else ROUTES:
             where = f"routing.{role}.{route_name}"
             if (role, route_name) == ("implementation", "supercritical"):
                 if route_name in rows:
@@ -64,6 +65,8 @@ def validate(config: dict) -> None:
 def row(config: dict, role: str, route: str) -> dict:
     if (role, route) == ("implementation", "supercritical"):
         route = "critical"
+    if role == "decider":
+        route = "standard"
     if role == "docs" and role not in config["routing"]:
         role = "style_review"
     return config["routing"][role][route]

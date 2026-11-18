@@ -11,6 +11,14 @@ import json
 import re
 import sys
 
+# The tier definitions the main model (via the prompt hook) and the cheap decider classify by.
+RUBRIC = ("trivial = conversational, git/commit/push, one-line or config edits; standard = a well-defined change "
+          "in a few files; complex = multi-component, unclear root cause, design work; critical = security, auth, "
+          "data/schema, payments, production, irreversible actions; supercritical = needs frontier reasoning beyond "
+          "known solutions (top model reasons, plans and reviews; never implements).")
+# Keyword routes that floor the model's choice; a lower keyword route never restricts it.
+FLOOR_ROUTES = ("complex", "critical")
+
 TIERS = {
     "trivial": ("haiku", "low"),
     "standard": ("sonnet", "medium"),

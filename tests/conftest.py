@@ -3,6 +3,7 @@
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -50,15 +51,32 @@ def write_config(project):
 
 
 class FakeOpenRouter:
-    """Local stand-in for the OpenRouter API; edit ``key_data`` and ``models`` per test."""
+    """Local stand-in for the OpenRouter API; edit ``key_data``, ``models`` and ``chat_*`` per test.
+
+    ``/chat/completions`` answers ``chat_status`` with ``chat_body`` (a dict, or raw text)
+    after ``chat_delay`` seconds and records each request in ``chat_requests``.
+    """
 
     def __init__(self):
         self.key_data = {"usage_daily": 0, "usage_weekly": 0, "usage_monthly": 0,
                          "limit": None, "limit_remaining": None, "limit_reset": None}
         self.models = []
+        self.chat_status = 200
+        self.chat_body = self.answer('{"route": "standard", "reason": "fake"}')
+        self.chat_delay = 0
+        self.chat_requests = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                outer.chat_requests.append({"path": self.path, "headers": dict(self.headers),
+                                            "body": raw.decode()})
+                if self.path != "/chat/completions":
+                    return self._send(404, {})
+                time.sleep(outer.chat_delay)
+                self._send(outer.chat_status, outer.chat_body)
+
             def do_GET(self):
                 if self.path == "/key":
                     if not self.headers.get("Authorization", "").startswith("Bearer "):
@@ -69,7 +87,7 @@ class FakeOpenRouter:
                 self._send(404, {})
 
             def _send(self, code, body):
-                raw = json.dumps(body).encode()
+                raw = (body if isinstance(body, str) else json.dumps(body)).encode()
                 self.send_response(code)
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
@@ -81,6 +99,11 @@ class FakeOpenRouter:
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @staticmethod
+    def answer(content: str) -> dict:
+        """A chat completion whose message content is ``content``."""
+        return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
 
 @pytest.fixture

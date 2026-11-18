@@ -2,9 +2,9 @@ export const meta = {
   name: 'smart-task',
   description: 'Cost- and quota-aware classify, route, implement, test and review loop with Claude/Codex/OpenRouter fallback',
   whenToUse:
-    'Invoked by /cost-aware-orchestrator:smart-task. Requires args {task, timestamp, plugin_root}; optional {classification, task_id, handoff, permission_mode, parent_task_id}. Workflow scripts have no shell or clock, so the caller supplies the timestamp and plugin root.',
+    'Invoked by /cost-aware-orchestrator:smart-task. Requires args {task, timestamp, plugin_root}; optional {classification, decider, task_id, handoff, permission_mode, parent_task_id}. Workflow scripts have no shell or clock, so the caller supplies the timestamp and plugin root.',
   phases: [
-    { title: 'Classify', detail: 'deterministic keyword classifier' },
+    { title: 'Classify', detail: 'cheap OpenRouter decider, else the keyword classifier' },
     { title: 'Route', detail: 'engine state, config and routing decisions' },
     { title: 'Scout', detail: 'cheap repository lookup for nontrivial tasks' },
     { title: 'Plan', detail: 'architect pass for complex, critical or supercritical tasks' },
@@ -194,12 +194,13 @@ Return JSON: \`{"changed": true|false, "files": [edited paths], "reason": "one l
 phase('Classify')
 let classification = ARGS.classification
 if (!classification || !ROUTES.includes(classification.route)) {
-  const r = await bash(
-    script([`mkdir -p ${q(RUN)}`, heredoc(`${RUN}/task.txt`, TASK), `${PY('classify_task.py')} --task-file ${q(`${RUN}/task.txt`)}`]),
-    'classify', 'Classify',
-  )
-  if (r.exit_code !== 0) throw new Error(`classify_task.py exited ${r.exit_code}: ${r.stderr.slice(-500)}`)
-  classification = parseJson(r.stdout, 'classify_task.py')
+  const taskFile = q(`${RUN}/task.txt`)
+  const keywords = `${PY('classify_task.py')} --task-file ${taskFile}`
+  // The cheap decider never blocks: its exit 3 (or any failure) falls back to the keyword classifier.
+  const classify = ARGS.decider === false ? keywords : `${PY('decide_route.py')} < ${taskFile} || ${keywords}`
+  const r = await bash(script([`mkdir -p ${q(RUN)}`, heredoc(`${RUN}/task.txt`, TASK), classify]), 'classify', 'Classify')
+  if (r.exit_code !== 0) throw new Error(`classification exited ${r.exit_code}: ${r.stderr.slice(-500)}`)
+  classification = parseJson(r.stdout, 'classification')
 }
 let ROUTE = classification.route
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)

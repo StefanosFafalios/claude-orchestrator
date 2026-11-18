@@ -27,7 +27,8 @@ Workflow:
    leave test/lint/typecheck empty until detected or configured, and touch nothing
    outside `.claude/`. On no, continue with plugin defaults.
 2. Classify using the full conversation and the hook rubric; the hook supplies per-tier
-   routes and a keyword safety floor. Never choose below the floor.
+   routes and a keyword safety floor. Never choose below the floor. When the hook says to,
+   pipe the prompt to `decide_route.py` first and use its route; on exit 3 classify yourself.
 3. Check engine state:
    python3 "<scripts>/engine_state.py" status
 4. Choose engine, model, and effort:

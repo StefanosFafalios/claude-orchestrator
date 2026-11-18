@@ -80,3 +80,11 @@ def test_legacy_project_keys_are_reported_not_fatal(write_config):
     assert config["legacy_keys"] == ["defaults", "codex.tiers"]
     assert config["codex"]["max_files_per_fallback"] == 3
     assert "defaults" not in config and "tiers" not in config["codex"]
+
+
+def test_decider_row_is_optional_and_single():
+    template = json.loads(TEMPLATE.read_text())
+    assert template["routing"]["decider"] == {"standard": {"models": ["deepseek-v4.1-flash", "haiku"], "effort": "low"}}
+    assert row(template, "decider", "critical") == template["routing"]["decider"]["standard"]
+    del template["routing"]["decider"]
+    validate(template)  # configs from before the decider simply have none

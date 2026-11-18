@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from classify_task import classify  # noqa: E402
+from classify_task import FLOOR_ROUTES, RUBRIC, classify  # noqa: E402
+from decide_route import usable as decider_usable  # noqa: E402
 from engine_state import (  # noqa: E402
     PLUGIN_ROOT,
     ConfigError,
@@ -129,14 +130,17 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
         return "THIS PROMPT: question. Answer it directly: no subagents, no Codex, no file edits."
     cls = classify(prompt)
     task_key = hashlib.sha256((prompt + "\0" + session_id).encode("utf-8")).hexdigest()[:16]
+    # Same length budget either way: the hook output is close to its cap.
     lines = [
+        "Pipe this prompt to decide_route.py (stdin), use its route; exit 3: classify by rubric and conversation. State `route=<tier>: <reason>`, follow that row. Approvals (yes) keep the approved tier, never lower."
+        if decider_usable(config, state) else
         "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, then follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
-        "Rubric: trivial = conversational, git/commit/push, one-line or config edits; standard = a well-defined change in a few files; complex = multi-component, unclear root cause, design work; critical = security, auth, data/schema, payments, production, irreversible actions; supercritical = needs frontier reasoning beyond known solutions (top model reasons, plans and reviews; never implements).",
+        f"Rubric: {RUBRIC}",
     ]
-    if cls["route"] in ("complex", "critical"):
+    if cls["route"] in FLOOR_ROUTES:
         lines.append(f"Floor: at least {cls['route']} ({cls['reason']}); never pick a lower tier.")
     tiers = ("trivial", "standard", "complex", "critical", "supercritical")
-    floor = tiers.index(cls["route"]) if cls["route"] in ("complex", "critical") else 0
+    floor = tiers.index(cls["route"]) if cls["route"] in FLOOR_ROUTES else 0
     built = [steps_for(tier, config, state, task_key, permission_mode) for tier in tiers[floor:]]
     rows = [row for row, _, _ in built]
     used = set().union(*(engines for _, engines, _ in built))

@@ -31,7 +31,10 @@ The engines are `claude`, `codex` and `openrouter`. An engine disabled in `engin
 
 The model classifies with the full conversation and rubric. The hook supplies per-tier
 routes and a keyword safety floor covering only the literal prompt text; never choose below
-that floor. The dispatch guard does not check architect tier; the rows guide architect use.
+that floor. When OpenRouter is set up, healthy and within budget, a cheap model on the
+`routing.decider` row classifies the prompt instead (`decide_route.py`, clamped to the floor);
+its exit 3 on any failure returns classification to the session model.
+The dispatch guard does not check architect tier; the rows guide architect use.
 Once per task, the scout may propose
 any route or the implementer may propose one step up or down for a clear mismatch.
 Never downgrade critical. The main model switches to the new row and carries finished

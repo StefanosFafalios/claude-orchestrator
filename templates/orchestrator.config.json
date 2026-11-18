@@ -340,6 +340,15 @@
         ],
         "effort": "low"
       }
+    },
+    "decider": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku"
+        ],
+        "effort": "low"
+      }
     }
   },
   "map_meta": {
