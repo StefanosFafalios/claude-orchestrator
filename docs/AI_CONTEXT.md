@@ -24,7 +24,7 @@ project's `.claude/orchestrator.config.json`.
 | `skills/cost-aware-orchestration/` | auto-activating policy skill and its references |
 | `skills/request-feature/` | skill that files generic GitHub feature requests for missing plugin behavior |
 | `commands/` | `/cost-aware-orchestrator:*` slash commands |
-| `agents/` | tiered subagents (scout, implementer, architect, verifier, codex-reviewer) |
+| `agents/` | tiered subagents (scout, implementer, architect, verifier, style-reviewer, codex-reviewer, doc-updater) |
 | `workflows/smart-task.js` | Workflow-tool script behind `/smart-task` |
 | `hooks/` | `UserPromptSubmit` policy injection, `PreToolUse` dispatch guardrail |
 | `scripts/` | deterministic Python routing/state/handoff logic and Bash CLI wrappers |

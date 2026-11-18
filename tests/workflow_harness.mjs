@@ -16,7 +16,7 @@ async function agent(prompt, opts = {}) {
   const command = /<command>\n([\s\S]*)\n<\/command>/.exec(prompt)
   if (command) {
     const r = spawnSync('bash', ['-c', command[1]], { cwd: project, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: project } })
-    calls.push({ label: opts.label, kind: 'bash', exit_code: r.status })
+    calls.push({ label: opts.label, kind: 'bash', exit_code: r.status, command: command[1] })
     return { exit_code: r.status, stdout: r.stdout, stderr: r.stderr }
   }
   calls.push({ label: opts.label, kind: 'agent', agentType: opts.agentType, model: opts.model, effort: opts.effort, prompt, schema: opts.schema })

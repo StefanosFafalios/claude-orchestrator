@@ -96,6 +96,17 @@ The cheapest model in the scout row, low effort, on the first healthy engine tha
 off Claude it runs read-only through the engine's wrapper. A constrained pick (one atomic
 task, human review) is skipped rather than spending scarce quota. Trivial tasks get no scout.
 
+## Docs
+
+Last, once a nontrivial task passed its tests and review without needing a human,
+`--role docs` (the `style_review` models and effort when the config has no `docs` row)
+runs `doc-updater`: it checks whether the change altered behavior, commands, paths,
+conventions or workflows that the AI instruction docs (`AI_CONTEXT.md`, `CLAUDE.md`,
+`AGENTS.md`, project skills and agents) describe, and makes the smallest accurate edit or
+none. Off Claude it runs through the engine's wrapper with `workspace-write` and the agent's
+rules in the prompt; exit 42 marks that engine limited and re-routes; exit 43 asks a human.
+A constrained pick is skipped.
+
 ## Architecture
 
 Claude first while healthy: sonnet / high for trivial and standard (used only to escalate a

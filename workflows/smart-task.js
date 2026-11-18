@@ -14,6 +14,7 @@ export const meta = {
     { title: 'Review', detail: 'independent review, preferably on the other engine' },
     { title: 'Fallback', detail: 'usage limit: mark engine, write handoff, switch' },
     { title: 'Finalize', detail: 'record results in engine state' },
+    { title: 'Docs', detail: 'update AI instruction docs after tests and review pass' },
   ],
 }
 
@@ -163,6 +164,32 @@ const FINDINGS_SCHEMA = {
   },
 }
 
+const DOCS_SCHEMA = {
+  type: 'object',
+  required: ['changed', 'files'],
+  properties: {
+    changed: { type: 'boolean' },
+    files: { type: 'array', items: { type: 'string' } },
+    reason: { type: 'string' },
+  },
+}
+// The body of agents/doc-updater.md, verbatim (a test checks it): Codex and OpenRouter get it in the prompt.
+const DOC_RULES = `Check whether the finished task changed behavior, commands, paths, conventions or workflows that the project's AI instruction docs describe. If it did, make the smallest accurate edit; otherwise edit nothing and report \`no change\`.
+
+Scope (edit only these):
+- \`docs/AI_CONTEXT.md\` and any nested \`AI_CONTEXT.md\`, \`CLAUDE.md\`, \`AGENTS.md\`
+- \`.claude/skills/**/SKILL.md\` and \`.claude/agents/*.md\`
+- when the project is the cost-aware-orchestrator plugin itself (\`.claude-plugin/plugin.json\`), also its \`skills/\`, \`agents/\` and \`commands/\` docs
+
+Rules:
+- When \`CLAUDE.md\` or \`AGENTS.md\` only points to a shared \`AI_CONTEXT.md\` (the \`sync_instructions.py\` layout), edit the shared file; never turn a pointer back into a copy.
+- Never edit user-facing docs (README, CHANGELOG, other files under \`docs/\`), code, tests or config.
+- Describe only what the diff shows; never invent behavior.
+- Use Bash only to read: \`git diff\`, \`git log\`, \`git status\`.
+- Never commit.
+
+Return JSON: \`{"changed": true|false, "files": [edited paths], "reason": "one line"}\`.`
+
 // ---------------------------------------------------------------------------
 phase('Classify')
 let classification = ARGS.classification
@@ -226,6 +253,7 @@ function stop(summary, filesChanged = []) {
     task_id: TASK_ID, route: ROUTE,
     implementation_engine: 'none', implementation_model: '', implementation_effort: '',
     review_engine: 'none', review_findings: [], files_changed: filesChanged, tests: { skipped: true },
+    docs: { engine: 'none', changed: false, files: [] },
     fallback_events: fallbackEvents, reroute_events: rerouteEvents, requires_human_review: true, summary, handoffs,
   }
 }
@@ -668,6 +696,58 @@ const records = [...enginesUsed, reviewEngine]
   .map(e => `${PY('engine_state.py')} record-result --engine ${e} --task-id ${q(TASK_ID)} --status ${success ? 'success' : 'failed'} > /dev/null`)
 if (records.length) await bash(records.join(' && '), 'record-result', 'Finalize')
 
+// ---------------------------------------------------------------------------
+// Docs: once the work passed tests and review, a cheap pass keeps the AI instruction docs current.
+let docs = { engine: 'none', changed: false, files: [] }
+
+async function docsPass() {
+  const changed = result.files_changed || []
+  const brief = `Task (${ROUTE}): ${TASK}\nSummary: ${result.summary}\nFiles changed: ${changed.join(', ')}\n` +
+    'The changes are uncommitted: read them with git diff HEAD and git status.'
+  const tried = []
+  let dr = await routeRole('docs', [], 'Docs')
+  while (true) {
+    if (dr.engine === 'none' || dr.scope === 'single_atomic_task' || dr.requires_human_review) {
+      log(`docs skipped: ${dr.engine === 'none' ? dr.reason : `${dr.engine} is constrained`}`)
+      return
+    }
+    if (dr.engine === 'claude') {
+      const d = await agent(brief, {
+        agentType: `${PLUGIN}:doc-updater`, label: 'docs', phase: 'Docs', schema: DOCS_SCHEMA, model: dr.model, effort: dr.effort,
+      })
+      if (d) docs = { engine: 'claude', changed: Boolean(d.changed), files: d.files || [] }
+      else log('doc updater failed; docs unchecked')
+      return
+    }
+    const w = await runWrapper(dr.engine, dr, `${RUN}/docs.md`, 'workspace-write', `docs:${dr.engine}`, 'Docs',
+      `${DOC_RULES}\n\n${brief}\nPrint that JSON as your last line.`)
+    if (w.paused) {
+      requiresHumanReview = true
+      docs = { engine: dr.engine, changed: false, files: [], paused: w.paused }
+      return
+    }
+    if (w.code !== 42) {
+      if (w.code !== 0) { log(`docs failed (${dr.engine} exit ${w.code}); docs unchecked`); return }
+      let d = null
+      try { d = parseJson(w.output, 'docs') } catch (e) { /* no JSON: fall back to the diff */ }
+      // Without the JSON, report files the docs pass added to the diff.
+      const files = d && Array.isArray(d.files) ? d.files : w.files.filter(f => !changed.includes(f))
+      docs = { engine: dr.engine, changed: d ? Boolean(d.changed) : files.length > 0, files }
+      return
+    }
+    await markLimit(dr.engine, 'Docs')
+    tried.push(dr.engine)
+    const next = await routeRole('docs', tried, 'Docs')
+    fallbackEvents.push({ phase: 'docs', from: dr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${dr.engine} usage limit` })
+    dr = next
+  }
+}
+
+if (ROUTE !== 'trivial' && success && !requiresHumanReview && (result.files_changed || []).length) {
+  phase('Docs')
+  await docsPass()
+}
+
 return {
   task_id: TASK_ID,
   route: ROUTE,
@@ -679,6 +759,7 @@ return {
   files_changed: result.files_changed || [],
   tests,
   lint: lintResult,
+  docs,
   fallback_events: fallbackEvents,
   reroute_events: rerouteEvents,
   fix_events: fixEvents,

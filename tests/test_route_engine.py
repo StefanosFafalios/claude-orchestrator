@@ -203,6 +203,15 @@ def test_style_review_routing(config, write_config):
     assert (unsplit["engine"], unsplit["reason"]) == ("none", "covered by the main review")
 
 
+def test_docs_role_cli(project, capsys):
+    from route_engine import main
+    assert main(["--role", "docs", "--task-route", "standard"]) == 0
+    docs = json.loads(capsys.readouterr().out)
+    assert (docs["engine"], docs["model"], docs["effort"]) == ("claude", "haiku", "low")
+    assert main(["--role", "docs", "--task-route", "trivial"]) == 0
+    assert json.loads(capsys.readouterr().out)["engine"] == "none"
+
+
 def test_codex_disabled(write_config):
     write_config({"engines": {"codex": False}})
     config = load_config()

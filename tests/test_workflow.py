@@ -136,6 +136,63 @@ def test_claude_only_scout_and_style_use_agents(repo, write_config):
     assert (calls["review:style"]["agentType"], calls["review:style"]["model"]) == ("cost-aware-orchestrator:style-reviewer", "haiku")
 
 
+DOCS = {"changed": True, "files": ["CLAUDE.md"], "reason": "new command"}
+NO_DOCS = {"engine": "none", "changed": False, "files": []}
+
+
+def test_standard_task_ends_with_doc_updater(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    docs = out["calls"][-1]
+    assert (docs["label"], docs["agentType"], docs["model"], docs["effort"]) == (
+        "docs", "cost-aware-orchestrator:doc-updater", "haiku", "low")
+    assert "add unit tests for parser" in docs["prompt"] and "app.py" in docs["prompt"]
+    assert out["result"]["docs"] == {"engine": "claude", "changed": True, "files": ["CLAUDE.md"]}
+
+
+def openrouter_docs(write_config, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("OPENROUTER_POLL_SECONDS", "0.2")
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                  "models": {"or-cheap": {"score": 60, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"docs": {"standard": {"models": ["or-cheap", "haiku"], "effort": "low"}}}})
+
+
+def test_doc_updater_runs_on_openrouter_with_agent_rules(repo, write_config, monkeypatch, fake_openrouter):
+    openrouter_docs(write_config, monkeypatch)
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert "docs" not in calls and calls["docs:openrouter"]["exit_code"] == 0
+    command = calls["docs:openrouter"]["command"]
+    assert "OPENROUTER_SANDBOX=workspace-write" in command and "openrouter_run.py" in command and "vendor/cheap" in command
+    rules = (ROOT / "agents" / "doc-updater.md").read_text().split("---\n", 2)[2].strip()
+    prompt = (repo / ".claude" / "orchestrator" / "runs" / out["result"]["task_id"] / "docs.md").read_text()
+    assert rules in prompt, "external engines get the doc-updater rules verbatim"
+    assert "add unit tests for parser" in prompt
+    # The fake engine prints no JSON and changes no file beyond the implementation's.
+    assert out["result"]["docs"] == {"engine": "openrouter", "changed": False, "files": []}
+
+
+def test_doc_updater_usage_limit_reroutes_to_claude(repo, write_config, monkeypatch, fake_openrouter):
+    fake_openrouter.key_data["limit_remaining"] = 0  # the runner refuses with exit 42
+    openrouter_docs(write_config, monkeypatch)
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert calls["docs:openrouter"]["exit_code"] == 42
+    assert calls["docs"]["agentType"] == "cost-aware-orchestrator:doc-updater"
+    assert {"phase": "docs", "from": "openrouter", "to": "claude", "reason": "openrouter usage limit"} in out["result"]["fallback_events"]
+    assert state(repo)["openrouter"]["status"] == "limited"
+    assert out["result"]["docs"]["engine"] == "claude"
+
+
+def test_failed_tests_skip_doc_updater(repo, write_config):
+    write_config({"engines": {"codex": False}, "commands": {"test": "echo FAIL; exit 1"}})
+    agents = dict(SCOUT_AGENTS, docs=DOCS, **{"implement:claude": [DONE, DONE, DONE]})
+    out = run(repo, {"task": "add unit tests for parser", "agents": agents})
+    assert out["result"]["tests"]["passed"] is False
+    assert "docs" not in labels(out["calls"]) and out["result"]["docs"] == NO_DOCS
+
+
 def test_constrained_scout_is_not_run(repo, write_config):
     # Near the limit the router asks for one atomic task and a human: not worth a scout.
     write_config({"engines": {"codex": False}})
@@ -166,7 +223,8 @@ def test_trivial_task_skips_scout_plan_and_review(repo, write_config):
     out = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
     result = out["result"]
     assert result["implementation_model"] == "haiku"
-    assert not [c for c in labels(out["calls"]) if c in ("scout", "plan") or c.startswith("review:")]
+    assert not [c for c in labels(out["calls"]) if c in ("scout", "plan", "docs") or c.startswith(("review:", "route:docs"))]
+    assert result["docs"] == NO_DOCS
     assert result["review_engine"] == "none"
     assert result["lint"]["passed"] is False and result["requires_human_review"] is True, "lint gates trivial work"
     write_config({"commands": {"lint": "echo lint-ok"}})

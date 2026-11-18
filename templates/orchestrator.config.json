@@ -306,6 +306,40 @@
         ],
         "effort": "low"
       }
+    },
+    "docs": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      }
     }
   },
   "map_meta": {

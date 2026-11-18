@@ -88,6 +88,7 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
     review = route("review", tier, config, state, task_key=task_key, implementation_model=impl["model"],
                    permission_mode=permission_mode)
     style = route("style_review", tier, config, state)
+    docs = route("docs", tier, config, state)
 
     def choice(role: str, result: dict) -> str:
         if result["engine"] == "none":
@@ -103,7 +104,7 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
         return f"{name}/{result['model']}/{effort}"
 
     steps = []
-    results = [impl, review, style]
+    results = [impl, review, style, docs]
     if tier in ("complex", "critical", "supercritical"):
         scout = route("scout", tier, config, state)
         arch = route("architecture", tier, config, state, task_key=task_key, permission_mode=permission_mode)
@@ -116,8 +117,9 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
     steps.append(f"review={choice(review_role, review)}")
     steps.append(f"style={choice('style-reviewer', style)}" if style["engine"] != "none"
                  else "review covers style")
+    steps.append(f"docs={choice('doc-updater', docs)}")
     if impl["requires_human_review"]:
-        steps.append("quota constrained: one atomic task, then human review")
+        steps.insert(-1, "quota constrained: one atomic task, then human review")
     return f"{tier}: " + "; ".join(steps) + ".", {r["engine"] for r in results}, impl["engine"]
 
 
@@ -151,9 +153,9 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
     lines.extend(rows)
-    lines.append("If the tier changes mid-task, switch to that row, carry finished work over via a handoff, never downgrade critical.")
-    lines.append("For multi-task plans, route each task separately with route_engine.py --task-id <task>.")
-    lines.append("Visibility: one line before each step saying what starts and why. Run Codex via Bash run_in_background and wait for the completion notification without reading output early. Relay approach and key decisions in at most 3 bullets.")
+    lines.append("If the tier changes mid-task, switch rows, hand finished work over via a handoff; never downgrade critical.")
+    lines.append("Multi-task plans: route each task with route_engine.py --task-id <task>.")
+    lines.append("Visibility: one line before each step saying what starts and why. Run Codex via Bash run_in_background; await its completion notice without reading output early. Relay approach and key decisions in at most 3 bullets.")
     return "\n".join(lines)
 
 

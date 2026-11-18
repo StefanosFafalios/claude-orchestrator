@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from engine_state import ConfigError
 
-ROLES = ("implementation", "review", "scout", "style_review", "architecture")
+ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs")
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
 LEGACY_KEYS = ("defaults", "codex.tiers", "codex.default_model")
 ASK_ALLOWED = {("review", "supercritical"), ("architecture", "supercritical")}
-# Trivial work is handled directly: nothing routes a scout or a model review for it.
+# Trivial work is handled directly: nothing routes a scout, a model review or a docs pass for it.
 # Copies of older templates still carry these rows, so they are ignored, not rejected.
-UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial")}
+UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial"), ("docs", "trivial")}
 
 
 def legacy_keys(project_config: dict) -> list[str]:
@@ -35,6 +35,8 @@ def validate(config: dict) -> None:
     if not isinstance(models, dict) or not isinstance(routing, dict):
         raise ConfigError("config needs 'models' and 'routing' objects")
     for role in ROLES:
+        if role == "docs" and role not in routing:
+            continue  # configs from before the docs role: row() uses style_review
         rows = routing.get(role)
         if not isinstance(rows, dict):
             raise ConfigError(f"routing.{role} is missing")
@@ -62,6 +64,8 @@ def validate(config: dict) -> None:
 def row(config: dict, role: str, route: str) -> dict:
     if (role, route) == ("implementation", "supercritical"):
         route = "critical"
+    if role == "docs" and role not in config["routing"]:
+        role = "style_review"
     return config["routing"][role][route]
 
 

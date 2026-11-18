@@ -115,6 +115,10 @@ def test_directive_rows_rubric_and_floor(project, write_config):
     assert all(f"\n{tier}:" in complex_text for tier in ("complex", "critical"))
     assert all(f"\n{tier}:" not in complex_text for tier in ("trivial", "standard"))
     assert "review=codex-reviewer/" in next(line for line in text.splitlines() if line.startswith("complex:"))
+    for tier in ("standard", "complex", "critical", "supercritical"):
+        assert next(line for line in text.splitlines() if line.startswith(f"{tier}:")).endswith(
+            "; docs=doc-updater/haiku/low."), tier
+    assert "docs=" not in next(line for line in text.splitlines() if line.startswith("trivial:"))
     assert text.count("Codex: write_handoff.py") == 1
     for prompt in ("yes", "fix typo in README", "commit and push"):
         assert "Floor:" not in context(project, prompt)

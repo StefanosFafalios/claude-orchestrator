@@ -221,6 +221,32 @@
         ],
         "effort": "low"
       }
+    },
+    "docs": {
+      "standard": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "haiku"
+        ],
+        "effort": "low"
+      }
     }
   }
 }

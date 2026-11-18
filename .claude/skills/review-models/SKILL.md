@@ -9,7 +9,7 @@ Maintainer-only (lives in this repo's `.claude/skills/`, not shipped). Updates t
 map in `templates/orchestrator.config.json`:
 
 - `models`: canonical model id -> `{score, engines: {claude|codex|openrouter: name}}`
-- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`) ->
+- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`) ->
   route (`trivial`, `standard`, `complex`, `critical`, `supercritical`) ->
   `{models: [ranked ids], effort}`. Supercritical effort is `"ask"`. `implementation.supercritical`
   reuses the critical row: top models never implement.
@@ -51,8 +51,10 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   unavailable Codex names are skipped automatically.
 - `supercritical` rows hold only the top models, and top models (e.g. `fable`) appear in no
   other row: their effort is always asked from the user because they are expensive.
-- Trivial tasks get no scout and no model review: there are no `review`, `style_review` or
-  `scout` rows for `trivial` (`model_map.UNUSED`).
+- `docs` (the end-of-task doc updater) follows the `style_review` rule: the same models and
+  effort, cheapest-first, `low`. A config without `routing.docs` routes on `style_review`.
+- Trivial tasks get no scout and no model review: there are no `review`, `style_review`,
+  `scout` or `docs` rows for `trivial` (`model_map.UNUSED`).
 - The same canonical model on several engines is one `models` entry with several `engines`
   names (e.g. `claude` and `openrouter` slugs).
 - Claude aliases (`haiku`, `sonnet`, `opus`) move with each Claude release while OpenRouter

@@ -45,6 +45,17 @@ def test_shipped_template_validates_without_unused_rows():
     validate(template)
 
 
+def test_docs_rows_match_style_review_and_are_optional():
+    template = json.loads(TEMPLATE.read_text())
+    routing = template["routing"]
+    assert set(routing["docs"]) == {"standard", "complex", "critical", "supercritical"}
+    assert all(routing["docs"][r] == routing["style_review"][r] for r in routing["docs"])
+    # Configs from before the docs role still load: docs routes on the style_review row.
+    del routing["docs"]
+    validate(template)
+    assert row(template, "docs", "complex") == routing["style_review"]["complex"]
+
+
 def test_unused_rows_are_ignored(write_config):
     # Configs copied from older templates still carry these rows; they never route.
     write_config({"routing": {role: {route: {"models": ["ghost"], "effort": "low"}} for role, route in UNUSED}})

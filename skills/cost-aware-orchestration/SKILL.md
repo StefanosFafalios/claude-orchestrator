@@ -83,7 +83,10 @@ Workflow:
     failures. Exit code 1 is an ordinary failure: report it.
 15. If all engines are constrained, stop fan-out and require human approval.
 16. After completion, run `engine_state.py record-result` for each engine used and save
-    the final summary to `.claude/orchestrator/results/<task-id>.md`.
+    the final summary to `.claude/orchestrator/results/<task-id>.md`. When a nontrivial
+    task passed its tests and review without needing a human, run `--role docs` last:
+    `doc-updater` on Claude, or the engine's wrapper with `workspace-write` and the
+    `doc-updater` rules in the prompt. It updates only AI instruction docs, when needed.
 
 All delegated work follows `references/coding-standards.md`. The full routing table is
 in `references/routing-policy.md`.

@@ -7,7 +7,8 @@ and quota deliberately:
   critical or supercritical by the main model using conversation context and a keyword safety floor, then routed to the
   cheapest sufficient Claude model and effort.
 - **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
-  `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), and `codex-reviewer`.
+  `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), `doc-updater`
+  (haiku/low), and `codex-reviewer`.
 - **Three engines**: Claude, plus optional Codex (your local Codex CLI) and optional
   OpenRouter (pay-per-token, under a yearly allowance you choose; off by default).
 - **Quota fallback**: when an engine is near or at its limit, the remaining work goes
@@ -67,7 +68,8 @@ flowchart TD
         MR[Main review: cheapest model for the tier<br/>never weaker than implementer, never the same model]
         SR[style review, cheapest model<br/>skipped if its engine is constrained<br/>or review.split is false]
     end
-    REV --> DONE[Report result]
+    REV --> DOCS[doc-updater: AI instruction docs, if needed<br/>skipped when a human must review]
+    DOCS --> DONE[Report result]
 ```
 
 ## Requirements
@@ -211,6 +213,11 @@ covers standards, best practices and code/text reduction (set `review.split` to 
 the failing output. If they still fail, another engine (or one Claude tier up) gets
 one try, then it stops and asks you.
 
+**Doc updates.** Once a nontrivial task passes its tests and review, a cheap `doc-updater`
+pass checks whether the AI instruction docs (`AI_CONTEXT.md`, `CLAUDE.md`, `AGENTS.md`,
+project skills and agents) still describe the code, and makes the smallest fix if not. It
+never touches the README, other docs, code or config, and never commits.
+
 When an engine is constrained (near limit or limited), its work goes to another usable
 engine at the equivalent tier, unless that tier's `implement` switch is off. When all
 are constrained, the engine with the most remaining quota does one atomic task and a human
@@ -252,7 +259,7 @@ after a failed critical attempt (there is no keyword floor).
 The default `models` catalog lists each canonical model once, with its name per engine
 (for example the Claude alias and the OpenRouter slug for the same model), capability
 scores with source and date, and prices. The `routing` section ranks models per role
-(implementation, review, scout, style review, architecture) and tier, with effort and an
+(implementation, review, scout, style review, architecture, docs) and tier, with effort and an
 `implement` switch. Every listed model clears that tier's bar, so work is split by
 headroom across the engines that can serve one. Because identity is per model, not per
 engine, "same model" and "at least as capable" are decided correctly across engines.
