@@ -22,6 +22,7 @@ project's `.claude/orchestrator.config.json`.
 |---|---|
 | `.claude-plugin/` | `plugin.json` manifest and `marketplace.json` only |
 | `skills/cost-aware-orchestration/` | auto-activating policy skill and its references |
+| `skills/request-feature/` | skill that files generic GitHub feature requests for missing plugin behavior |
 | `commands/` | `/cost-aware-orchestrator:*` slash commands |
 | `agents/` | tiered subagents (scout, implementer, architect, verifier, codex-reviewer) |
 | `workflows/smart-task.js` | Workflow-tool script behind `/smart-task` |

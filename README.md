@@ -161,6 +161,10 @@ Add the runtime state to the project's `.gitignore`:
 /cost-aware-orchestrator:reset-engine-state
 ```
 
+The `request-feature` skill activates when you want orchestration behavior the plugin
+lacks: it checks existing features, then files a generic issue on the plugin's
+GitHub repository with `gh` (never project-specific details).
+
 Without a command, the policy still applies:
 
 | Prompt | Behavior |
