@@ -146,8 +146,16 @@ def openrouter_usage(config: dict, now: float | None = None) -> dict | None:
     if snapshot is None:
         return None
     now = time.time() if now is None else now
-    wins = openrouter_budget.windows(snapshot, config["openrouter"]["budget"], now)
-    return observation(wins, snapshot["observed_at"], "openrouter-key-cache", now)
+    budget = config["openrouter"]["budget"]
+    wins = openrouter_budget.windows(snapshot, budget, now)
+    obs = observation(wins, snapshot["observed_at"], "openrouter-key-cache", now)
+    if obs is not None:
+        # The pace window never resets, so a limited OpenRouter would stay limited until a run
+        # refreshed the cache, and nothing routes to a limited engine. A snapshot from before
+        # today's UTC window with no cap still spent counts as a reset.
+        day_start = openrouter_budget.window_starts(now)[0].timestamp()
+        obs["windows_reset"] = snapshot["observed_at"] < day_start and not openrouter_budget.cap_spent(snapshot, budget, now)
+    return obs
 
 
 def observe(config: dict | None = None) -> dict:

@@ -122,3 +122,28 @@ def test_fake_server_rejects_missing_bearer(fake_openrouter):
     with pytest.raises(urllib.error.HTTPError) as exc:
         urllib.request.urlopen(fake_openrouter.base + "/key")
     assert exc.value.code == 401
+
+
+def limited_state():
+    state = load_state()
+    state["openrouter"].update(status="limited", remaining_pct=0, last_checked="2026-11-15T12:00:00+00:00")
+    return state
+
+
+def test_limited_openrouter_recovers_after_its_window_rolls_over(project, monkeypatch):
+    config = enable(load_config(), monkeypatch)
+    ob.write_snapshot({"usage_daily": 2.0, "usage_weekly": 2.0, "usage_monthly": 2.0}, MID_MONTH - DAY)  # yesterday's cap
+    state = limited_state()
+    assert sync_usage(state, config, {"openrouter": openrouter_usage(config, MID_MONTH)})
+    assert state["openrouter"]["status"] == "healthy"
+
+
+def test_limited_openrouter_stays_limited_while_a_cap_is_spent(project, monkeypatch):
+    config = enable(load_config(), monkeypatch)
+    ob.write_snapshot({"usage_weekly": 9.5}, MID_MONTH - DAY)  # the weekly cap still binds today
+    state = limited_state()
+    sync_usage(state, config, {"openrouter": openrouter_usage(config, MID_MONTH)})
+    assert state["openrouter"]["status"] == "limited"
+    ob.write_snapshot({"usage_daily": 0.5}, MID_MONTH - 3600)  # same day, before the limit was marked
+    sync_usage(state, config, {"openrouter": openrouter_usage(config, MID_MONTH)})
+    assert state["openrouter"]["status"] == "limited"
