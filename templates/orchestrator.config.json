@@ -181,7 +181,6 @@
           "sonnet",
           "gpt-6.2-sol",
           "opus",
-          "fable",
           "gpt-6.2-astra"
         ],
         "effort": "high"
@@ -191,7 +190,6 @@
           "gemini-4-carbon",
           "sonnet",
           "opus",
-          "fable",
           "gpt-6.2-astra"
         ],
         "effort": "high"

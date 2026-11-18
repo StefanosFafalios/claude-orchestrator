@@ -45,9 +45,12 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   Codex-only setup, the review row for that route must hold a different model on the same
   engine scoring at least as high (the shipped-template test in `tests/test_route_engine.py`
   checks this). Strong models appended at the end of a review row cost nothing until needed.
+  Exception: when only a top model outranks the implementer (Opus on Claude alone), leave it
+  out; the router then picks the next-best different model and asks for human review.
 - Never add a model below the quality bar just to give an engine work (no Codex-only tails):
   unavailable Codex names are skipped automatically.
-- `supercritical` rows hold only the top models.
+- `supercritical` rows hold only the top models, and top models (e.g. `fable`) appear in no
+  other row: their effort is always asked from the user because they are expensive.
 - Trivial tasks get no scout and no model review: there are no `review`, `style_review` or
   `scout` rows for `trivial` (`model_map.UNUSED`).
 - The same canonical model on several engines is one `models` entry with several `engines`

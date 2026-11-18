@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from conftest import TEMPLATE
 
@@ -111,7 +113,12 @@ def test_trivial_tasks_get_no_review_or_scout(config):
 @pytest.mark.parametrize("only", ["claude", "codex"])
 @pytest.mark.parametrize("task_route", ["standard", "complex", "critical", "supercritical"])
 def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, only, task_route):
-    """Cheapest-first review rows still hold a stronger, different reviewer on a single engine."""
+    """Cheapest-first review rows still hold a stronger, different reviewer on a single engine.
+
+    The one exception is Opus on Claude alone below supercritical: only the top model outranks
+    it, and top models review only supercritical work (their effort is asked), so a weaker,
+    different model reviews and a human checks.
+    """
     monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
     write_config({"engines": {"claude": only == "claude", "codex": only == "codex"}})
     config = load_config()
@@ -119,8 +126,21 @@ def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, 
         if not engine_name(config, model, only):
             continue
         r = route("review", task_route, config, state(), implementation_model=model)
-        assert r["engine"] == only and r["requires_human_review"] is False, (model, r)
-        assert r["canonical_model"] != model and score(config, r["canonical_model"]) >= score(config, model)
+        assert r["engine"] == only and r["canonical_model"] != model, (model, r)
+        if (only, model) == ("claude", "opus") and task_route != "supercritical":
+            assert r["requires_human_review"] is True, (model, r)
+            continue
+        assert r["requires_human_review"] is False and score(config, r["canonical_model"]) >= score(config, model), (model, r)
+
+
+def test_shipped_top_models_only_in_supercritical_rows():
+    routing = json.loads(TEMPLATE.read_text())["routing"]
+    for role, rows in routing.items():
+        for task_route, entry in rows.items():
+            if (role, task_route) in (("review", "supercritical"), ("architecture", "supercritical")):
+                assert entry["models"] == ["fable", "gpt-6.2-astra"]
+            else:
+                assert "fable" not in entry["models"], (role, task_route)
 
 
 def test_review_defaults_by_route(config):

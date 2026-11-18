@@ -34,7 +34,9 @@ score. The router keeps review quality (a reviewer scores at least the implement
 never the same model), so review and architecture rows no longer go strongest-first. Each
 review row holds a stronger, different reviewer for every model its implementation row can
 pick on a Claude-only or Codex-only setup; this put `gpt-6.2-astra` at the end of
-`review.standard` and `fable` near the end of `review.complex` and `review.critical`.
+`review.standard`. The exception is Opus on Claude alone: only `fable` outranks it, and top
+models stay in supercritical rows (effort asked), so that review falls back to the next-best
+different model with human review.
 Architecture for trivial/standard moved from Opus to Sonnet. Trivial tasks get no model
 review, so `review.trivial`, `style_review.trivial` and `scout.trivial` were removed (nothing
 routes to them).
