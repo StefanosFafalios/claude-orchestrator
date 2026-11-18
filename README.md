@@ -167,7 +167,7 @@ Without a command, the policy still applies:
 | "Fix this typo" | Claude haiku/low, no fan-out |
 | "Add tests for this module" | sonnet/medium with a focused implementer |
 | "Debug this intermittent failure" | scout, then sonnet/high (opus/high if needed) |
-| "Refactor authentication and add tests" | critical: architect plan, healthy engine implements, other engine reviews |
+| "Refactor authentication and add tests" | critical: architect plan, the critical implementation row implements, the best model for the tier reviews (never weaker, never the same model) |
 | "What does this function do?" | answered directly; no workflow |
 
 ## Routing policy
