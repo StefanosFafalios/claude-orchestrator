@@ -5,10 +5,46 @@ evidence links (with dates), and the spend of the smoke tests.
 
 ## 2026-11-18: first evidence-based seed
 
-Approved by the owner (proposal: `.superpowers/sdd/2026-11-18-openrouter-engine/task-11-proposal.md`).
+Approved by the owner on 2026-11-18. The proposal itself was a local working file; its
+evidence is reproduced below.
 
 **Models.** Scores are now a composite: the mean, over the available benchmarks, of each
-model's best result as a percentage of the best single-model result.
+model's best result as a percentage of the best single-model result. Each model is taken at
+its best (usually max-effort) configuration. The best single-model results used as 100:
+
+- AA Intelligence Index: 64.56
+- AA Coding Agent Index v2.1: 58.5
+- Terminal-Bench 4.1: 65.76 (the multi-model "Copilot Fusion" at 71.21 is excluded)
+- AA Terminal-Bench 4.0: 67.2
+- AA FrontierCode 2.0: 49.1
+
+Raw results ("–" = no published result):
+
+| model | AA Intelligence Index | AA Coding Agent Index v2.1 | Terminal-Bench 4.1 | AA Terminal-Bench 4.0 | AA FrontierCode 2.0 | composite |
+|---|---|---|---|---|---|---|
+| Claude Fable 5.2 | 64.6 | 58.5 | 65.76 | 61.6 | 49.1 | 98 |
+| GPT-6.2 Astra | 62.1 | – | – | 64.1 | 49.0 | 97 (3 sources) |
+| Claude Opus 5.5 | 59.1 | 58.2 | 65.76 | 59.6 | 46.4 | 95 |
+| Gemini 4 Carbon | 60.0 | 55.5 | 64.55 | 65.2 | 40.6 | 93 |
+| Claude Sonnet 5.5 | 54.5 | 56.3 | 63.94 | 63.6 | 41.7 | 92 |
+| GPT-6.2 Sol | 57.3 | – | – | 60.1 | 44.4 | 90 (3 sources) |
+| GPT-6 Astra (removed) | 56.9 | 53.1 | 60.30 | – | – | 90 |
+| GPT-6.1 Sol (removed) | 54.6 | 52.2 | 60.91 | – | – | 89 |
+| Gemini 4 Hydrogen | 53.9 | 52.3 | 56.36 | 54.0 | 39.0 | 84 |
+| GPT-6.1 Terra | 51.3 | 48.6 | 53.33 | 55.6 | 42.3 | 83 |
+| Kimi K3.1 Pro (not added) | 46.5 | 48.6 | 59.70 | 67.2 | 25.5 | 80 |
+| Claude Haiku 5.5 | 36.5 | 29.6 | 40.00 | 32.8 | 34.9 | 58 |
+| Muse Ember (not added) | 36.0 | 39.7 | 30.61 | 40.9 | 27.2 | 57 |
+| GLM-5.3 (not added) | 31.7 | 40.1 | 41.21 | 41.9 | 21.6 | 57 |
+| DeepSeek V4.1 Flash 1017 | 32.6 | 36.8 | 38.48 | 33.8 | 28.5 | 56 |
+| GLM-5.3-Flash (not added) | 27.8 | – | 36.97 | 32.8 | 17.6 | 46 |
+| GPT-5.6 Terra (removed) | 32.3 | – | 21.52 | – | – | 41 (2 sources) |
+| GPT-6 Luna | 27.9 | 25.9 | 15.15 | 12.6 | 25.2 | 36 |
+| GPT-5.6 Luna (removed) | 23.8 | – | 17.58 | – | – | 32 (2 sources) |
+
+Blended OpenRouter prices, (3 × prompt + completion) / 4 in $/Mtok, live catalog 2026-11-18:
+fable 16, gpt-6.2-astra 16, opus 8, gemini-4-carbon 4, sonnet 4, gpt-6.2-sol 4,
+gemini-4-hydrogen 3, gpt-6.1-terra 2, haiku 0.20, gpt-6-luna 0.20, deepseek-v4.1-flash 0.15.
 
 | model | score (was) | engines |
 |---|---|---|
