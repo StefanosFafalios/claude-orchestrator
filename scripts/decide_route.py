@@ -3,7 +3,8 @@
 
 Usage: decide_route.py [--prompt-file F]  (default: the prompt on stdin)
 Exit 0 prints ``{"route", "reason", "model"}``; the route never falls below the keyword
-safety floor. Exit 3 means "fallback: the session model classifies": OpenRouter is off,
+safety floor and never rises above ``critical`` (a ``supercritical`` answer is reported
+in ``reason``). Exit 3 means "fallback: the session model classifies": OpenRouter is off,
 has no key, is constrained or over budget, has no decider row, or the call failed in any
 way. A failure here never marks engine state: the decider is advisory and never blocks.
 """
@@ -81,6 +82,10 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
     if decided not in ROUTES:
         raise Fallback(f"invalid route {decided!r}")
     reason = f"decider ({picked['model']}): {str(answer.get('reason', ''))[:200]}"
+    if decided == "supercritical":
+        # The route is a binding floor, and supercritical gets none: a prompt-only guess must not
+        # force the top model. The session may still raise to supercritical from context.
+        decided, reason = "critical", f"{reason}; suggests supercritical"
     floor = classify(prompt)  # the raw prompt: redaction would hide credential keywords
     if floor["route"] in FLOOR_ROUTES and ROUTES.index(decided) < ROUTES.index(floor["route"]):
         decided, reason = floor["route"], f"keyword floor over decider's {decided}: {floor['reason']}"

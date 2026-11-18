@@ -50,6 +50,16 @@ def test_keyword_floor_clamps_the_decided_route_up(project, write_config, monkey
     assert code == 0 and json.loads(out)["route"] == "critical"
 
 
+def test_decider_floor_stops_at_critical(project, write_config, monkeypatch, fake_openrouter):
+    """Supercritical has no floor: only the session, with the whole conversation, may pick it."""
+    enable_decider(write_config, monkeypatch)
+    fake_openrouter.chat_body = fake_openrouter.answer('{"route": "supercritical", "reason": "novel proof"}')
+    code, out, _ = decide(project, "prove the scheduler never deadlocks")
+    result = json.loads(out)
+    assert code == 0 and result["route"] == "critical"
+    assert "suggests supercritical" in result["reason"] and "novel proof" in result["reason"]
+
+
 def test_haiku_on_openrouter_when_the_cheapest_model_is_missing(project, write_config, monkeypatch,
                                                                 fake_openrouter, usage_files):
     enable_decider(write_config, monkeypatch, models={"haiku": {"score": 40, "engines": {
