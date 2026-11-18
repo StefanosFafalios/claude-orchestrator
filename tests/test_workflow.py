@@ -383,4 +383,31 @@ def test_supercritical_headless_manual_stops_before_top_model(repo):
     assert "plan" not in labels(out["calls"]) and "implement:claude" not in labels(out["calls"])
     result = out["result"]
     assert result["requires_human_review"] is True and result["implementation_engine"] == "none"
-    assert "set-effort" in result["summary"]
+    tid = result["task_id"]
+    assert f"set-effort --task-id {tid} --effort <level>, then rerun with task_id: {tid}." in result["summary"]
+
+
+def test_supercritical_fix_escalation_never_uses_top_model(repo, write_config):
+    write_config({"commands": {"test": "echo FAIL; exit 1"}})
+    out = run(repo, {"task": "migrate the billing ledger", "args": {"classification": SUPERCRITICAL, "permission_mode": "auto"},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN, "implement:claude": [DONE, DONE],
+                                "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    impls = [c for c in out["calls"] if c["label"] == "implement:claude"]
+    assert len(impls) == 2 and all(c["model"] == "opus" for c in impls), "the top model never implements"
+    assert [e["why"] for e in out["result"]["fix_events"]] == ["fix pass on the same engine"]
+
+
+def test_unavailable_architecture_skips_plan(repo, write_config):
+    write_config({"balance": {"mode": "off"},
+                  "routing": {"architecture": {"complex": {"models": ["gpt-6-astra"], "effort": "high"}}}})
+    set_state(repo, codex="limited")
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {"route": "complex", "reason": "test"}},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    assert "plan" not in labels(out["calls"]) and "implement:claude" in labels(out["calls"])
+    assert out["result"]["implementation_engine"] == "claude"
+
+
+def test_long_task_id_is_replaced(repo):
+    out = run(repo, {"task": "fix typo in README", "args": {"task_id": "a" * 65},
+                     "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    assert out["result"]["task_id"].startswith("fix-typo-in-readme-")

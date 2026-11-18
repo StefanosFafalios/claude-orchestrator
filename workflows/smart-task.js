@@ -39,7 +39,8 @@ function fnv1a(text) {
   return h.toString(16).padStart(8, '0')
 }
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+// At most 64 characters, so engine_state.py set-effort accepts every task id.
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const slug = TASK.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 32).replace(/-+$/, '') || 'task'
 const TASK_ID = SAFE_ID.test(String(ARGS.task_id || '')) ? ARGS.task_id : `${slug}-${fnv1a(`${TASK}|${ARGS.timestamp || 'no-timestamp'}`)}`
 const RUN = `.claude/orchestrator/runs/${TASK_ID}`
@@ -317,9 +318,11 @@ async function plan() {
   if (!PLANNED.includes(ROUTE)) return null
   const ar = routing.ARCHITECTURE
   // Headless supercritical outside auto mode: nobody chose the effort, so no top-model call.
-  if (ar.requires_human_review && !ar.effort) {
+  // (An unavailable architecture engine also has no effort; that only skips the plan.)
+  if (ar.engine !== 'none' && ar.requires_human_review && !ar.effort) {
+    // The generated task id hashes the timestamp, so the rerun must reuse it to find the recorded effort.
     return stop(`Supercritical effort needs a human: ${ar.reason}. Record it with ` +
-      `engine_state.py set-effort --task-id ${TASK_ID} --effort <level>, then rerun.`)
+      `engine_state.py set-effort --task-id ${TASK_ID} --effort <level>, then rerun with task_id: ${TASK_ID}.`)
   }
   if (planned || ARGS.handoff) return null
   planned = true
@@ -475,13 +478,14 @@ async function runTests(label, phaseName) {
   return { command: testCommand, skipped: false, exit_code: t.exit_code, passed: t.exit_code === 0, output_tail: t.stdout.slice(-2000) }
 }
 
-// Escalation after a failed fix pass: another engine at this route, else the architecture model.
+// Escalation after a failed fix pass: another engine at this route, else the architecture model
+// when it differs from the implementer. Supercritical's architecture model is the top model, which never implements.
 async function escalation() {
   const limited = fallbackEvents.map(e => e.from)
   const other = await routeRole('implementation', [engine, ...limited], 'Fix')
   if (other.engine !== 'none') return { engine: other.engine, tier: { model: other.model, effort: other.effort }, why: 'escalation to another engine' }
   const top = routing.ARCHITECTURE
-  if (top.engine !== 'none' && top.effort && !limited.includes(top.engine)) {
+  if (ROUTE !== 'supercritical' && top.engine !== 'none' && top.effort && top.model !== tier.model && !limited.includes(top.engine)) {
     return { engine: top.engine, tier: { model: top.model, effort: top.effort }, why: 'escalation to the architecture model' }
   }
   return null
