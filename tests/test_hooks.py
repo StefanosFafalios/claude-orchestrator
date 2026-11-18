@@ -226,7 +226,6 @@ def test_supercritical_row_and_effort_line(project, write_config, monkeypatch):
     row = next(line for line in text.splitlines() if line.startswith("supercritical:"))
     assert "architect required=architect/" in row and "/ASK" in row and "review=" in row
     assert "set-effort --task-id" in text and "--permission-mode auto" in text
-    assert "OPENROUTER_SANDBOX=workspace-write openrouter_run.py" in text or "[OpenRouter]" not in text
     floor = context(project, "drop the users table")
     assert "\nsupercritical:" in floor and "Floor: at least critical" in floor
 
@@ -241,3 +240,30 @@ def test_guard_denies_openrouter_review_when_openrouter_limited(project):
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     assert dispatch(project, "cost-aware-orchestrator:codex-reviewer", "run openrouter_run.py handoff")[0] == "deny"
     assert dispatch(project, "cost-aware-orchestrator:codex-reviewer", "review diff")[0] == "allow"
+
+
+def openrouter_only(write_config, monkeypatch, role):
+    """Config where the standard row for ``role`` can only run on OpenRouter."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    write_config({
+        "engines": {"codex": False, "openrouter": True},
+        "balance": {"mode": "off"},
+        "models": {"or-model": {"score": 99, "engines": {"openrouter": "vendor/model"}}},
+        "routing": {role: {"standard": {"models": ["or-model"], "effort": "medium"}}},
+    })
+
+
+def test_openrouter_review_row_and_run_line(project, write_config, monkeypatch):
+    openrouter_only(write_config, monkeypatch, "review")
+    text = context(project, "add a button")
+    assert "codex-reviewer[OpenRouter]/vendor/model/medium" in text
+    assert "openrouter_run.py <handoff>; exit 43" in text
+    assert "codex_with_fallback.sh" not in text and "Rows marked [OpenRouter]" not in text
+
+
+def test_openrouter_implementation_row_delegates(project, write_config, monkeypatch):
+    openrouter_only(write_config, monkeypatch, "implementation")
+    text = context(project, "add a button")
+    assert "implement=[OpenRouter] OpenRouter/vendor/model/medium" in text
+    assert "Rows marked [OpenRouter] implement on OpenRouter: delegate" in text
+    assert "openrouter_run.py <handoff>" in text

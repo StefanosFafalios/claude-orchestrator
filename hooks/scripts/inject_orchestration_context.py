@@ -78,13 +78,13 @@ def is_question(prompt: str) -> bool:
 LABELS = {"codex": "Codex", "openrouter": "OpenRouter"}
 
 
-def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mode: str = "") -> str:
-    """Build a compact row from the routing decisions for this tier."""
+def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mode: str = ""):
+    """Build a compact row from the routing decisions: ``(row, engines used, implementation engine)``."""
     if tier == "trivial":
-        return "trivial: handle directly, lowest effort, no review."
+        return "trivial: handle directly, lowest effort, no review.", set(), None
     impl = route("implementation", tier, config, state, task_key=task_key)
     if impl["engine"] == "none":
-        return f"{tier}: No engine available ({impl['reason']}); do not start; ask user."
+        return f"{tier}: No engine available ({impl['reason']}); do not start; ask user.", set(), None
     review = route("review", tier, config, state, task_key=task_key, implementation_model=impl["model"],
                    permission_mode=permission_mode)
     style = route("style_review", tier, config, state)
@@ -92,14 +92,22 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
     def choice(role: str, result: dict) -> str:
         if result["engine"] == "none":
             return "none"
-        name = role if result["engine"] == "claude" or role == "codex-reviewer" else LABELS[result["engine"]]
+        engine = result["engine"]
+        if engine == "claude":
+            name = role
+        elif role == "codex-reviewer":
+            name = "codex-reviewer" if engine == "codex" else f"codex-reviewer[{LABELS[engine]}]"
+        else:
+            name = LABELS[engine]
         effort = "ASK" if result["effort"] == "ask" else result["effort"]
         return f"{name}/{result['model']}/{effort}"
 
     steps = []
+    results = [impl, review, style]
     if tier in ("complex", "critical", "supercritical"):
         scout = route("scout", tier, config, state)
         arch = route("architecture", tier, config, state, task_key=task_key, permission_mode=permission_mode)
+        results += [scout, arch]
         steps += [f"scout={choice('scout', scout)}",
                   f"architect {'if unclear' if tier == 'complex' else 'required'}={choice('architect', arch)}"]
     marker = f"[{LABELS[impl['engine']]}] " if impl["engine"] in LABELS else ""
@@ -110,7 +118,7 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
                  else "review covers style")
     if impl["requires_human_review"]:
         steps.append("quota constrained: one atomic task, then human review")
-    return f"{tier}: " + "; ".join(steps) + "."
+    return f"{tier}: " + "; ".join(steps) + ".", {r["engine"] for r in results}, impl["engine"]
 
 
 def directive(prompt: str, config: dict, state: dict, session_id: str = "", permission_mode: str = "") -> str:
@@ -127,15 +135,18 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
         lines.append(f"Floor: at least {cls['route']} ({cls['reason']}); never pick a lower tier.")
     tiers = ("trivial", "standard", "complex", "critical", "supercritical")
     floor = tiers.index(cls["route"]) if cls["route"] in ("complex", "critical") else 0
-    rows = [steps_for(tier, config, state, task_key, permission_mode) for tier in tiers[floor:]]
+    built = [steps_for(tier, config, state, task_key, permission_mode) for tier in tiers[floor:]]
+    rows = [row for row, _, _ in built]
+    used = set().union(*(engines for _, engines, _ in built))
+    delegated = {impl for _, _, impl in built}
     lines.append(f"Agents are {PLUGIN}:<name>.")
     lines.append(f"Test: {config['commands'].get('test') or 'none configured'}.")
-    if any("Codex/" in row or "codex-reviewer/" in row for row in rows):
+    if "codex" in used:
         lines.append("Codex: write_handoff.py, then CODEX_SANDBOX=workspace-write CODEX_MODEL=<model> CODEX_EFFORT=<effort> codex_with_fallback.sh <handoff>.")
-    if any("OpenRouter/" in row for row in rows):
+    if "openrouter" in used:
         lines.append("OpenRouter: write_handoff.py, then OPENROUTER_MODEL=<model> OPENROUTER_EFFORT=<effort> OPENROUTER_SANDBOX=workspace-write openrouter_run.py <handoff>; exit 43 = paused over budget: tell the user and ask continue (--resume <run>) or stop (--stop <run>).")
-    for label in LABELS.values():
-        if any(f"[{label}]" in row for row in rows):
+    for engine, label in LABELS.items():
+        if engine in delegated:
             lines.append(f"Rows marked [{label}] implement on {label}: delegate, do not edit files in this Claude session.")
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
