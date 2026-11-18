@@ -8,18 +8,22 @@ from conftest import ROOT
 HOOKS = ROOT / "hooks" / "scripts"
 
 
+FORWARDED = ("ORCHESTRATOR_CLAUDE_USAGE_FILE", "CODEX_HOME", "OPENROUTER_API_KEY",
+             "ORCHESTRATOR_OPENROUTER_USAGE_FILE", "ORCHESTRATOR_OPENROUTER_MODELS_FILE")
+
+
 def run_hook(name, payload, project):
     out = subprocess.run(
         [sys.executable, str(HOOKS / name)],
         input=json.dumps(payload), capture_output=True, text=True, check=True, timeout=5,
         env={"CLAUDE_PROJECT_DIR": str(project), "PATH": "/usr/bin:/bin",
-             **{k: os.environ[k] for k in ("ORCHESTRATOR_CLAUDE_USAGE_FILE", "CODEX_HOME")}},
+             **{k: os.environ[k] for k in FORWARDED if k in os.environ}},
     )
     return json.loads(out.stdout) if out.stdout.strip() else None
 
 
-def context(project, prompt="Refactor the authentication service and add tests"):
-    out = run_hook("inject_orchestration_context.py", {"prompt": prompt, "cwd": str(project)}, project)
+def context(project, prompt="Refactor the authentication service and add tests", **extra):
+    out = run_hook("inject_orchestration_context.py", {"prompt": prompt, "cwd": str(project), **extra}, project)
     assert set(out) == {"hookSpecificOutput"}
     assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     return out["hookSpecificOutput"]["additionalContext"]
@@ -185,7 +189,7 @@ def test_task_keys_include_prompt_and_session(monkeypatch, project):
     original_route = module.route
 
     def capture_route(*args, **kwargs):
-        if "task_key" in kwargs:
+        if args[0] == "implementation" and "task_key" in kwargs:
             keys.append(kwargs["task_key"])
         return original_route(*args, **kwargs)
 
@@ -193,9 +197,47 @@ def test_task_keys_include_prompt_and_session(monkeypatch, project):
     config = module.load_config(project)
     state = module.load_synced_state(config, project)
     first = module.directive("add a button", config, state, session_id="one")
-    assert len(first) < 1800
+    assert len(first) < 2400
     module.directive("add a button", config, state, session_id="one")
     module.directive("add a button", config, state, session_id="two")
     module.directive("add a menu", config, state, session_id="one")
-    assert len(set(keys[:3])) == 1 and keys[0] == keys[3] and keys[0] != keys[6] != keys[9]
-    assert len(module.directive("drop the users table", config, state, session_id="one")) < 1450
+    assert len(set(keys[:4])) == 1 and keys[0] == keys[4] and keys[0] != keys[8] != keys[12]
+    assert len(module.directive("drop the users table", config, state, session_id="one")) < 2100
+
+
+def test_openrouter_hidden_when_disabled(project, write_config):
+    write_config({})
+    text = context(project, "add a button")
+    assert "openrouter=" not in text and "OpenRouter" not in text
+
+
+def test_openrouter_shown_when_enabled(project, write_config, monkeypatch):
+    write_config({"engines": {"openrouter": True}})
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    text = context(project, "add a button")
+    assert "openrouter=healthy(100%)" in text
+
+
+def test_supercritical_row_and_effort_line(project, write_config, monkeypatch):
+    write_config({"engines": {"openrouter": True}})
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    text = context(project, "add a button", permission_mode="auto")
+    assert "supercritical = needs frontier reasoning" in text
+    row = next(line for line in text.splitlines() if line.startswith("supercritical:"))
+    assert "architect required=architect/" in row and "/ASK" in row and "review=" in row
+    assert "set-effort --task-id" in text and "--permission-mode auto" in text
+    assert "OPENROUTER_SANDBOX=workspace-write openrouter_run.py" in text or "[OpenRouter]" not in text
+    floor = context(project, "drop the users table")
+    assert "\nsupercritical:" in floor and "Floor: at least critical" in floor
+
+
+def test_legacy_keys_notice(project, write_config):
+    write_config({"defaults": {}})
+    text = context(project, "add a button")
+    assert 'Legacy config keys ignored: defaults; models now come from "models"/"routing"' in text
+
+
+def test_guard_denies_openrouter_review_when_openrouter_limited(project):
+    (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
+    assert dispatch(project, "cost-aware-orchestrator:codex-reviewer", "run openrouter_run.py handoff")[0] == "deny"
+    assert dispatch(project, "cost-aware-orchestrator:codex-reviewer", "review diff")[0] == "allow"
