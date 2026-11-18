@@ -268,10 +268,32 @@ def test_exclude_engine_moves_to_next(config):
     assert route("implementation", "standard", config, state(), exclude=("claude",))["engine"] == "codex"
 
 
-def test_critical_never_implemented_off_claude(config):
+def test_critical_waits_for_claude_when_no_other_engine_serves_opus(config):
+    # The frozen map serves opus on Claude only; the shipped map also has it on OpenRouter (R30).
     assert route("implementation", "critical", config, state(claude="limited", claude_pct=0))["engine"] == "none"
     near = route("implementation", "critical", config, state(claude="near_limit", claude_pct=20))
     assert (near["engine"], near["model"]) == ("claude", "opus")
+
+
+def shipped_config(write_config, monkeypatch, openrouter):
+    monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
+    if openrouter:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    write_config({"engines": {"openrouter": openrouter}})
+    return load_config()
+
+
+@pytest.mark.parametrize("claude, pct", [("near_limit", 20), ("limited", 0)])
+def test_shipped_critical_implementation_moves_to_opus_on_openrouter(write_config, monkeypatch, claude, pct):
+    """Same model, other engine: critical work keeps Opus while Claude cannot serve it (R30)."""
+    result = route("implementation", "critical", shipped_config(write_config, monkeypatch, True), state(claude=claude, claude_pct=pct))
+    assert (result["engine"], result["model"], result["canonical_model"]) == ("openrouter", "anthropic/claude-opus-5.5", "opus")
+    assert result["requires_human_review"] is False
+
+
+def test_shipped_critical_implementation_stops_without_openrouter(write_config, monkeypatch):
+    result = route("implementation", "critical", shipped_config(write_config, monkeypatch, False), state(claude="limited", claude_pct=0))
+    assert (result["engine"], result["requires_human_review"]) == ("none", True)
 
 
 def test_openrouter_enabled_without_key_is_ignored(config, monkeypatch):
