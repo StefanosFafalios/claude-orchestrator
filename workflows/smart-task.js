@@ -179,6 +179,8 @@ log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
 phase('Route')
 const routeCmd = (role, extra = '') => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${ROUTE_FLAGS}${extra}`
+// Scout and style review run only as Claude agents here: route them on Claude rather than skip them.
+const CLAUDE_ONLY = ' --exclude-engine codex --exclude-engine openrouter'
 
 // implModel 'auto' lets the router derive the implementer, so review picks a different, at least as capable model.
 async function routeAll(phaseName, implModel = 'auto') {
@@ -189,10 +191,10 @@ async function routeAll(phaseName, implModel = 'auto') {
       `echo ===STATE===`, `${PY('engine_state.py')} status`,
       `echo ===CONFIG===`, `${PY('engine_state.py')} config`,
       `echo ===IMPLEMENTATION===`, routeCmd('implementation'),
-      `echo ===SCOUT===`, routeCmd('scout'),
+      `echo ===SCOUT===`, routeCmd('scout', CLAUDE_ONLY),
       `echo ===ARCHITECTURE===`, routeCmd('architecture'),
       `echo ===REVIEW===`, routeCmd('review', ` --implementation-model ${q(implModel)}`),
-      `echo ===STYLE_REVIEW===`, routeCmd('style_review'),
+      `echo ===STYLE_REVIEW===`, routeCmd('style_review', CLAUDE_ONLY),
     ]),
     'route', phaseName,
   )

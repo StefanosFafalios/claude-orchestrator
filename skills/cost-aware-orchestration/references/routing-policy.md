@@ -87,8 +87,8 @@ With `review.split` (default true) the main review covers correctness, efficienc
 security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /
 `style_review_effort`, haiku / low) for standards, best-practice and reduction. It is
 skipped for trivial tasks, when `review.split` is false (the main review then covers all
-six categories) or when its routed engine is constrained. The smart-task workflow runs it
-only on Claude.
+six categories) or when its routed engine is constrained. The smart-task workflow routes
+scout and style review on Claude only (`--exclude-engine`), since it runs them as Claude agents.
 
 ## Scout
 

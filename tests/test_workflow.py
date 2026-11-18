@@ -85,6 +85,24 @@ def test_style_review_runs_in_parallel_and_merges(repo, write_config):
     assert "style review is skipped" not in main["prompt"]
 
 
+@pytest.mark.parametrize("task_route", ["standard", "complex"])
+def test_openrouter_first_scout_and_style_still_run_on_claude(repo, write_config, monkeypatch, task_route):
+    # The workflow dispatches scout and style review as Claude agents only, so an
+    # OpenRouter-first row must fall back to Claude instead of skipping them.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    cheap = {"models": ["or-cheap", "haiku"], "effort": "low"}
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                  "models": {"or-cheap": {"score": 60, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"scout": {task_route: cheap}, "style_review": {task_route: cheap}}})
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {"route": task_route, "reason": "test"}},
+                     "agents": {"scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
+                                "review:codex": NO_FINDINGS, "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    agents = {c["label"]: c for c in out["calls"] if c["kind"] == "agent"}
+    assert out["result"]["route"] == task_route
+    assert (agents["scout"]["agentType"], agents["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
+    assert (agents["review:style"]["agentType"], agents["review:style"]["model"]) == ("cost-aware-orchestrator:style-reviewer", "haiku")
+
+
 def test_unsplit_review_skips_style_agent(repo, write_config):
     write_config({"review": {"split": False}, "balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {
