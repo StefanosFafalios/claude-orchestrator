@@ -176,7 +176,7 @@ def sync_usage(state: dict, config: dict, observations: dict | None = None) -> b
         return False
     if observations is None:
         from usage_sources import observe  # Imported lazily: only syncing reads ~/.claude and ~/.codex.
-        observations = observe()
+        observations = observe(config)
     changed = False
     for engine in ENGINES:
         obs = observations.get(engine)

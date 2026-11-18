@@ -80,5 +80,9 @@ def engine_name(config: dict, model_id: str, engine: str) -> str:
         available = usage_sources.codex_models()
         if available is not None and name not in available:
             return ""
-    # ponytail: openrouter availability is trusted until usage_sources.openrouter_models() exists (Task 6)
+    if name and engine == "openrouter":
+        import usage_sources
+        available = usage_sources.openrouter_models()
+        if available is not None and name not in available:
+            return ""
     return name
