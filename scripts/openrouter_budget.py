@@ -109,8 +109,11 @@ def window_starts(now: float) -> tuple:
     return day, day - timedelta(days=day.weekday()), day.replace(day=1)
 
 
-def windows(snapshot: dict, budget: dict, now: float) -> list:
-    """``(used_pct, resets_at)`` for day, week and month, then the monthly pace window."""
+def windows(snapshot: dict, budget: dict, now: float, near_limit_pct: float = 25) -> list:
+    """``(used_pct, resets_at)`` for day, week and month, then the monthly pace window.
+
+    Spending at an even pace lands on the ``near_limit_pct`` line, so it still reads healthy.
+    """
     t = datetime.fromtimestamp(now, timezone.utc)
     day, week, month = window_starts(now)
     days_in_month = calendar.monthrange(t.year, t.month)[1]
@@ -128,11 +131,12 @@ def windows(snapshot: dict, budget: dict, now: float) -> list:
             out.append((100 * spent / cap, end.timestamp()))
     monthly = _num(budget.get("monthly_usd"))
     if monthly > 0:
-        # Spending ahead of the calendar reads as near limit before the hard cap bites.
+        # Spending ahead of the calendar reads as near limit before the hard cap bites; a day of
+        # grace keeps the first hours of a month from reading as far ahead.
         elapsed = (now - month.timestamp()) / (days_in_month * 86400)
         allowance = monthly * min(1.0, elapsed + 1 / days_in_month)
         spent = _num(snapshot.get("usage_monthly")) if observed >= month.timestamp() else 0.0
-        out.append((min(99.0, 100 * spent / allowance), None))
+        out.append((min(99.0, (100 - near_limit_pct) * spent / allowance), None))
     return out
 
 

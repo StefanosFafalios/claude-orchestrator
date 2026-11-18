@@ -33,8 +33,18 @@ def test_caps_from_yearly():
 
 
 def test_pace_ahead_is_near_limit_not_limited():
-    obs = observation(ob.windows(snap(usage_monthly=15), budget(), MID_MONTH), MID_MONTH, "t", MID_MONTH)
+    obs = observation(ob.windows(snap(usage_monthly=15), budget(), MID_MONTH, 25), MID_MONTH, "t", MID_MONTH)
     assert 0 < obs["remaining_pct"] < 25
+
+
+def pace_remaining(spent):
+    return observation(ob.windows(snap(usage_monthly=spent), budget(), MID_MONTH, 25), MID_MONTH, "t", MID_MONTH)["remaining_pct"]
+
+
+def test_even_pace_reads_healthy():
+    even = 20 * 14.5 / 30  # monthly cap x elapsed fraction of November at MID_MONTH
+    assert pace_remaining(even) >= 25, "at or under an even pace is healthy"
+    assert pace_remaining(even * 1.25) < 25, "well ahead of pace is near limit"
 
 
 def test_spent_daily_cap_is_limited():

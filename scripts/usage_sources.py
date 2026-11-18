@@ -147,7 +147,7 @@ def openrouter_usage(config: dict, now: float | None = None) -> dict | None:
         return None
     now = time.time() if now is None else now
     budget = config["openrouter"]["budget"]
-    wins = openrouter_budget.windows(snapshot, budget, now)
+    wins = openrouter_budget.windows(snapshot, budget, now, config["thresholds"]["near_limit_pct"])
     obs = observation(wins, snapshot["observed_at"], "openrouter-key-cache", now)
     if obs is not None:
         # The pace window never resets, so a limited OpenRouter would stay limited until a run

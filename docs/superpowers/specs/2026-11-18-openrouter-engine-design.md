@@ -95,8 +95,9 @@ year within budget).
 `remaining_pct` for OpenRouter is the minimum over:
 
 - each window (day, week, month): `100 × (1 − spend / cap)`;
-- **pace**: `100 × (1 − month_spend / (monthly_usd × elapsed_fraction_of_month))`, clamped to
-  [1, 100], with a small floor on the elapsed fraction so the first hours of a month aren't 0.
+- **pace**: `100 − (100 − near_limit_pct) × month_spend / (monthly_usd × (elapsed_fraction_of_month + 1 day))`,
+  clamped to [1, 100]: an even pace lands at or above the `near_limit_pct` line, and the day of
+  grace keeps the first hours of a month from reading as far ahead.
   The pace term never goes below 1, so running ahead of pace makes OpenRouter `near_limit`
   (deprioritized), never `limited`; only a spent cap makes it `limited`.
 
