@@ -134,15 +134,15 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
         if implementation_model == "auto":
             implementation_model = route("implementation", task_route, config, state, task_key)["canonical_model"]
         impl_id = _implementer(config, implementation_model) if implementation_model else None
-        eligible = [m for m in models if m != impl_id]
-        weak = False
-        if impl_id:
-            stronger = [m for m in eligible if model_map.score(config, m) >= model_map.score(config, impl_id)]
-            weak, eligible = not stronger, stronger or eligible
-        result = _result(config, _select(engines, eligible, exclude=tuple(exclude)), entry["effort"])
-        if weak and result["engine"] != "none":
-            result["requires_human_review"] = True
-            result["reason"] += "; no reviewer at least as capable as the implementer"
+        others = [m for m in models if m != impl_id]
+        stronger = [m for m in others if model_map.score(config, m) >= model_map.score(config, impl_id)] if impl_id else others
+        result = _result(config, _select(engines, stronger, exclude=tuple(exclude)), entry["effort"])
+        if result["engine"] == "none" and stronger != others:
+            # Nothing at least as capable is available: a weaker, different model beats no review.
+            result = _result(config, _select(engines, others, exclude=tuple(exclude)), entry["effort"])
+            if result["engine"] != "none":
+                result["requires_human_review"] = True
+                result["reason"] += "; no reviewer at least as capable as the implementer"
         return result
     result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"])
     if role == "style_review":

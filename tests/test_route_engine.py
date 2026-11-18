@@ -92,10 +92,37 @@ def test_reviewer_never_same_model(config):
 
 
 def test_reviewer_never_weaker_than_implementer(config):
-    # complex row [gpt-6.1-sol 82, sonnet 70, gpt-6-luna 55]: nothing >= 82 except the implementer itself
-    r = route("review", "complex", config, state(), implementation_model="gpt-6.1-sol")
-    assert r["canonical_model"] == "sonnet" and r["requires_human_review"] is True
+    # complex row [sol 82, opus 85, sonnet 70, luna 55]: nothing >= 85 except the implementer itself
+    r = route("review", "complex", config, state(), implementation_model="opus")
+    assert r["canonical_model"] == "gpt-6.1-sol" and r["requires_human_review"] is True
     assert "no reviewer at least as capable" in r["reason"]
+    stronger = route("review", "complex", config, state(), implementation_model="gpt-6.1-sol")
+    assert stronger["canonical_model"] == "opus" and stronger["requires_human_review"] is False
+
+
+def test_review_defaults_by_route(config):
+    trivial = route("review", "trivial", config, state(), implementation_model="haiku")
+    assert trivial["canonical_model"] == "gpt-6-luna" and trivial["requires_human_review"] is False
+    complex_ = route("review", "complex", config, state(), implementation_model="sonnet")
+    assert complex_["canonical_model"] == "gpt-6.1-sol" and complex_["requires_human_review"] is False
+    critical = route("review", "critical", config, state(), implementation_model="opus")
+    assert (critical["canonical_model"], critical["engine"], critical["requires_human_review"]) == (
+        "gpt-6-astra", "codex", False)
+
+
+def test_review_falls_back_to_weaker_model_with_human_review(config, write_config):
+    write_config({"engines": {"codex": False}})
+    cfg = load_config()
+    critical = route("review", "critical", cfg, state(), implementation_model="opus")
+    assert (critical["canonical_model"], critical["engine"], critical["requires_human_review"]) == (
+        "sonnet", "claude", True)
+    standard = route("review", "standard", cfg, state(), implementation_model="sonnet")
+    assert (standard["canonical_model"], standard["engine"], standard["requires_human_review"]) == (
+        "opus", "claude", False)
+
+
+def test_low_remaining_pct_counts_as_near_limit(config):
+    assert route("implementation", "standard", config, state(claude_pct=10))["engine"] == "codex"
 
 
 def test_same_model_across_engines_is_skipped(config, monkeypatch):
@@ -129,7 +156,7 @@ def test_style_review_routing(config, write_config):
 def test_codex_disabled(write_config):
     write_config({"engines": {"codex": False}})
     config = load_config()
-    assert route("review", "critical", config, state())["engine"] == "claude"
+    assert route("review", "critical", config, state(), implementation_model="opus")["engine"] == "claude"
     assert route("implementation", "standard", config, state(claude="near_limit", claude_pct=20))["engine"] == "claude"
 
 
@@ -174,8 +201,8 @@ def test_codex_model_preferences_fall_back_for_plan(config, usage_files):
 
 def test_unavailable_codex_model_routes_to_claude(config, usage_files):
     write_models(usage_files, "unrelated-model")
-    result = route("review", "critical", config, state())
-    assert (result["engine"], result["model"]) == ("claude", "opus")
+    result = route("review", "critical", config, state(), implementation_model="opus")
+    assert (result["engine"], result["model"], result["requires_human_review"]) == ("claude", "sonnet", True)
 
 
 def test_exclude_engine_moves_to_next(config):

@@ -149,7 +149,8 @@
       "trivial": {
         "models": [
           "haiku",
-          "gpt-6-luna"
+          "gpt-6-luna",
+          "sonnet"
         ],
         "effort": "low"
       },
@@ -157,6 +158,7 @@
         "models": [
           "sonnet",
           "gpt-6.1-terra",
+          "opus",
           "gpt-5.6-terra"
         ],
         "effort": "medium"
@@ -164,6 +166,7 @@
       "complex": {
         "models": [
           "gpt-6.1-sol",
+          "opus",
           "sonnet",
           "gpt-6-luna"
         ],
@@ -173,6 +176,7 @@
         "models": [
           "opus",
           "gpt-6-astra",
+          "sonnet",
           "gpt-6-luna"
         ],
         "effort": "high"
