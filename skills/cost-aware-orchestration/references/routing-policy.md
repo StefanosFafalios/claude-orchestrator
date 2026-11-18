@@ -2,9 +2,10 @@
 
 `scripts/route_engine.py` implements this table. It is model-centric: `models` is a catalog
 of canonical models (capability score, name per engine), and `routing` lists, per role and
-route, ranked models with an effort and an `implement` switch. Every listed model is
-sufficient for its route; each engine uses the highest-ranked one it can serve. The same
-model reached through two engines is still one model.
+route, ranked models with an effort. Every listed model is sufficient for its route; each
+engine uses the highest-ranked one it can serve. The same model reached through two engines
+is still one model, so a constrained engine's work can move to another engine that serves
+the same model with no loss of quality.
 
 ## Engine states
 
@@ -33,7 +34,7 @@ The model classifies with the full conversation and rubric. The hook supplies pe
 routes and a keyword safety floor covering only the literal prompt text; never choose below
 that floor. When OpenRouter is set up, healthy and within budget, a cheap model on the
 `routing.decider` row classifies the prompt first (`decide_route.py`, clamped to the keyword
-floor). It sees only the prompt, so its route is a further floor: the session model raises it
+floor and capped at `critical`: a `supercritical` answer is only a suggestion in its reason). It sees only the prompt, so its route is a further floor: the session model raises it
 from conversation context, never lowers it, and an approval keeps the approved tier. Its exit 3
 on any failure returns classification to the session model.
 The dispatch guard does not check architect tier; the rows guide architect use.
@@ -48,8 +49,8 @@ other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`
 ## Supercritical
 
 The top model only reasons, maps the task into sub-tasks (each at most `critical`, each
-routed and implemented on its own tier) and reviews the result; the tier has
-`implement: false` on every engine. It keeps critical's safeguards (architect required,
+routed and implemented on its own tier) and reviews the result; it never implements
+(supercritical implementation uses the `critical` row). It keeps critical's safeguards (architect required,
 never downgraded, human review when engines are constrained). Effort is asked from the user
 before the first top-model step and recorded with `engine_state.py set-effort`. With auto
 mode on, the top-most supercritical task asks once and its descendants inherit the answer
@@ -59,8 +60,7 @@ auto mode, else stops with `requires_human_review`.
 
 ## Implementation
 
-Among usable engines (enabled, a listed model resolves on them, the route allows
-implementation) that are `healthy`, the task hash picks one with probability proportional to
+Among usable engines (enabled, and a listed model resolves on them) that are `healthy`, the task hash picks one with probability proportional to
 headroom (`balance.routes`: standard, complex); other routes use the home engine. A
 `near_limit` or `limited` engine is skipped while a healthy candidate exists. If every
 candidate is constrained, use the one with the most remaining quota, one atomic task, human
@@ -69,28 +69,32 @@ review. If none is usable: `engine: none`, human review.
 Headroom = remaining % − `thresholds.near_limit_pct`. For OpenRouter, remaining % is its
 budget pacing: the monthly key limit is the hard cap, and daily/weekly caps (yearly allowance
 × 3/365 and × 2/52) pace spend. `fallback.<src>_to_<dst>: false` stops work moving from
-`src` to `dst`. A route with `implement: false` is never implemented (critical on every
-engine, supercritical always).
+`src` to `dst`. Critical implementation lists only the strongest implementing model
+(opus), so it never moves to a weaker model: while Claude is constrained it runs on another
+engine only when that engine serves the same model (OpenRouter's `anthropic/claude-opus-…`),
+else it stops with `engine: none` and human review.
 
 ## Test gate
 
 On a test failure: one fix pass on the same engine with only the failing output, then
-one escalation to the other engine (or one Claude tier up), then stop and ask.
+one escalation to another engine at the same route (or the architecture model when no
+other engine can take it), then stop and ask. The review that follows excludes every model
+that wrote code.
 
 ## Review
 
 The reviewer is chosen by capability, not by engine: the first model in the route's
 row (rows are ordered cheapest first) that is at least as capable as the implementer's model (`--implementation-model`),
 on whichever engine can serve it, using the same headroom and constrained rules as
-implementation. Same-model safeguard: if the pick is the model that implemented (any
-engine), it is skipped. Trivial tasks get no model review: the tests and lint gate them. Supercritical review uses the top
+implementation. Same-model safeguard: a model that implemented (any engine), including a
+fix-pass escalation or a fallback model, is skipped; pass each as a repeated
+`--implementation-model`, and the reviewer must be at least as capable as the strongest. Trivial tasks get no model review: the tests and lint gate them. Supercritical review uses the top
 model, which never implements. Claude reviews run as `verifier`; Codex and OpenRouter
-reviews as `codex-reviewer`, whose prompt names the wrapper and model. Critical reviews on
-Claude use `critical_review_model` / `critical_review_effort`.
+reviews as `codex-reviewer`, whose prompt names the wrapper and model.
 
 With `review.split` (default true) the main review covers correctness, efficiency and
-security; `--role style_review` adds a `style-reviewer` pass (`style_review_model` /
-`style_review_effort`, haiku / low) for standards, best-practice and reduction. It is
+security; `--role style_review` adds a `style-reviewer` pass (the `routing.style_review`
+row, cheapest first at low effort) for standards, best-practice and reduction. It is
 skipped for trivial tasks, when `review.split` is false (the main review then covers all
 six categories) or when its routed engine is constrained. Off Claude it runs as
 `codex-reviewer` through the engine's wrapper; exit 42 marks that engine limited and re-routes.

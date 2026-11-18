@@ -193,12 +193,12 @@ tiers and their default shape:
 | trivial | typo, rename, lookup | cheapest sufficient model, low effort | inline on Claude by default |
 | standard | feature, tests, docs | mid-size model, medium effort | |
 | complex | debugging, multi-file | mid-size model, high effort | may escalate a tier |
-| critical | production, security, migrations, auth/payment | strongest implementing model, high effort | architect plan required; stays on Claude by default |
+| critical | production, security, migrations, auth/payment | strongest implementing model, high effort | architect plan required; only the strongest model implements: on another engine that serves it (OpenRouter) while Claude is constrained, else it stops for a human |
 | supercritical | problems beyond known solutions, novel algorithms, root causes that beat a critical attempt | never (see below) | top model plans, maps tasks and reviews |
 
-Model settings may be a string or a preference list; the first model the engine can
-serve wins (for Codex, from its local model cache; for OpenRouter, from the cached
-`/models` list).
+Each routing row lists models in preference order (always a list, even for one model);
+each engine uses the first one it can serve (for Codex, from its local model cache; for
+OpenRouter, from the cached `/models` list).
 
 **Adaptive split.** When several engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit
@@ -216,8 +216,9 @@ engine). Trivial tasks get no model review: the tests and lint gate them. The ma
 covers standards, best practices and code/text reduction (set `review.split` to false to merge them).
 
 **Test gate.** If the project's tests fail, the same engine gets one fix pass with only
-the failing output. If they still fail, another engine (or one Claude tier up) gets
-one try, then it stops and asks you.
+the failing output. If they still fail, another engine at the same tier (or the
+architecture model) gets one try, then it stops and asks you. The review then uses a model
+that wrote none of the code.
 
 **Doc updates.** Once a nontrivial task passes its tests and review, a cheap `doc-updater`
 pass checks whether the AI instruction docs (`AI_CONTEXT.md`, `CLAUDE.md`, `AGENTS.md`,
@@ -225,8 +226,9 @@ project skills and agents) still describe the code, and makes the smallest fix i
 never touches the README, other docs, code or config, and never commits.
 
 When an engine is constrained (near limit or limited), its work goes to another usable
-engine at the equivalent tier, unless that tier's `implement` switch is off. When all
-are constrained, the engine with the most remaining quota does one atomic task and a human
+engine at the equivalent tier. Critical implementation lists only the strongest
+implementing model, so it moves only to an engine that serves that same model (OpenRouter
+serves Opus); without one it stops for a human. When all are constrained, the engine with the most remaining quota does one atomic task and a human
 reviews. Full table:
 [`skills/cost-aware-orchestration/references/routing-policy.md`](skills/cost-aware-orchestration/references/routing-policy.md).
 
@@ -239,7 +241,8 @@ Tune it per project:
 }
 ```
 
-Existing `defaults` and `codex.tiers` keys still work as overrides. Set
+Legacy `defaults`, `codex.tiers` and `codex.default_model` keys are ignored (the hook
+names any it finds); put those choices in `routing` rows instead. Set
 `"balance": {"mode": "off"}` to send each route to the engine of its first-listed
 model, so the others work only as fallbacks and reviewers.
 
@@ -263,10 +266,11 @@ after a failed critical attempt (there is no keyword floor).
 ## Capability map
 
 The default `models` catalog lists each canonical model once, with its name per engine
-(for example the Claude alias and the OpenRouter slug for the same model), capability
-scores with source and date, and prices. The `routing` section ranks models per role
-(implementation, review, scout, style review, architecture, docs) and tier, with effort and an
-`implement` switch. Every listed model clears that tier's bar, so work is split by
+(for example the Claude alias and the OpenRouter slug for the same model) and one
+composite capability `score`; the benchmark evidence, sources, dates and prices behind each
+score live in the maintainers' decision log (`map_meta.log`). The `routing` section ranks
+models per role (implementation, review, scout, style review, architecture, docs, decider)
+and tier, with an effort. Every listed model clears that tier's bar, so work is split by
 headroom across the engines that can serve one. Because identity is per model, not per
 engine, "same model" and "at least as capable" are decided correctly across engines.
 Override any row in your project config. The shipped defaults are a starting point, not a
@@ -359,8 +363,8 @@ If Codex reports a usage limit mid-task, write a handoff with
 ```
 
 An engine whose `remaining_pct` is below `near_limit_pct` is treated as `near_limit`.
-Models and efforts are overridable the same way under `defaults`, e.g.
-`{"defaults": {"implementation_model": "opus"}}`.
+Models and efforts are overridden per row under `routing`, e.g.
+`{"routing": {"implementation": {"standard": {"models": ["opus"], "effort": "medium"}}}}`.
 
 ## Disabling Codex
 
@@ -368,8 +372,10 @@ Models and efforts are overridable the same way under `defaults`, e.g.
 { "engines": { "codex": false } }
 ```
 
-All routing then stays on Claude. To keep Codex for review only, set
-`"fallback": {"claude_to_codex": false}`. OpenRouter is disabled the same way (`"engines": {"openrouter": false}`, the default).
+All routing then stays on Claude (and OpenRouter, if enabled). To keep Codex for review
+only, override the `routing.implementation` rows without Codex models (`gpt-…`): standard
+work lists a Codex model first, so `fallback.claude_to_codex: false` alone does not stop
+Codex implementing. OpenRouter is disabled the same way (`"engines": {"openrouter": false}`, the default).
 To turn off automatic orchestration (the hook
 then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
 

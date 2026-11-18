@@ -150,7 +150,7 @@ hard server-side cap. Exit 42 keeps meaning "limit reached" only.
 - `ENGINES = ("claude", "codex", "openrouter")`. `Engines` already computes per-engine status;
   extend loops and `fallback_allowed(src, dst)` (keys `<src>_to_<dst>`, all default true).
 - **Implementation split:** among healthy engines that can take the route (enabled, model
-  resolved, tier `implement` switch on), the task hash picks an engine with probability
+  resolved), the task hash picks an engine with probability
   proportional to headroom. Two-engine behavior is unchanged when OpenRouter is disabled.
 - **Constrained cases:** a constrained engine is skipped while any healthy candidate exists;
   if all candidates are constrained, use the one with the most remaining %, single atomic task,
@@ -164,28 +164,33 @@ hard server-side cap. Exit 42 keeps meaning "limit reached" only.
   capability. This replaces the current cross-engine review rule.
 - **Scout, style review, architecture:** OpenRouter may serve them per the capability map, as a
   candidate in the same headroom split; architecture keeps preferring Claude while healthy.
-- **Critical implementation** on OpenRouter follows the tier's `implement` switch, default false
-  (same stance as Codex).
+- **Critical implementation (owner decision, R30):** the critical row lists only the strongest
+  implementing model (Opus). While Claude is near or at its limit and OpenRouter is usable, it
+  runs as the same model on OpenRouter (`anthropic/claude-opus-…`): same model, no loss of
+  quality, spend capped by the budget pacing and pauses. Without such an engine it stops with
+  `engine: none` and human review. There is no per-tier `implement` switch.
 - **Re-tiering, test gate, handoffs** are engine-agnostic already; the "escalate to the other
   engine" step becomes "the next engine by the same split rules, excluding the one that failed".
 - **Fallback order** after an engine hits a limit: headroom split among the remaining usable
   engines whose `<src>_to_<dst>` fallback is allowed.
 - **Model identity:** the capability map is model-centric. Each entry is one canonical model with
   its name per engine (e.g. Claude engine `sonnet`, OpenRouter `anthropic/claude-sonnet-…`;
-  Codex `gpt-6-luna`, OpenRouter `openai/gpt-6-luna`), its capability scores and prices. That is
+  Codex `gpt-6-luna`, OpenRouter `openai/gpt-6-luna`) and its capability score. That is
   how "same model" and "at least as capable" are decided across engines, and why the map covers
   Claude and Codex models too, not only OpenRouter-exclusive ones.
 
 ### Capability map
 
 Model-centric (see Routing → Model identity): a `models` catalog of canonical models, each with
-per-engine names, capability scores (with source and date) and prices; and per role
+per-engine names and a composite capability score (its evidence, sources, dates and prices
+live in the decision log); and per role
 (`implementation`, `review`, `scout`, `style_review`, `architecture`) × tier a ranked list of
-canonical models with effort and the `implement` switch. Every listed model clears that tier's
+canonical models with effort. Every listed model clears that tier's
 bar, so all are sufficient: the router splits work by headroom across the usable engines that
 can serve any listed model, and each engine uses its highest-ranked model it can serve. That
-keeps prepaid subscription quota in use while OpenRouter spends at pace. Existing `defaults` / `codex.tiers` keys keep working as overrides so current
-project configs don't break; the exact migration is left to the builder. Model resolution
+keeps prepaid subscription quota in use while OpenRouter spends at pace. Existing `defaults` / `codex.tiers` / `codex.default_model` keys are stripped on load and
+named in a hook notice, so current project configs still load; their choices move to
+`routing` rows (builder's migration choice). Model resolution
 skips slugs missing from a cached copy of `/api/v1/models` (written by setup/status, like
 Codex's `models_cache.json`), else trusts the first entry. Each entry in the defaults carries a
 comment-free sibling `openrouter.map_meta` with the review date and decision-log reference.
@@ -200,7 +205,7 @@ causes that defeated a critical-tier attempt.
   never implementation.** The architect role uses the top entry of the map's `supercritical`
   list (e.g. Fable 5.2 via Claude, or the strongest equivalent on Codex/OpenRouter). It works out the hard reasoning and produces a plan detailed enough for cheaper models
   to execute; each planned task is then classified and implemented on its own tier, at most
-  `critical`. The `supercritical` tier has `implement: false` on every engine, so even the
+  `critical`. The `supercritical` tier has no implementation row (it uses the `critical` row), so even the
   hard-reasoning core is implemented by the critical-tier implementer following the top
   model's plan. The top model then reviews the result.
 - **Effort is the user's choice (owner decision).** The top model is too expensive to default to
