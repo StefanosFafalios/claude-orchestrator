@@ -12,6 +12,7 @@ is never placed on the command line: Codex reads it through ``env_key``.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -70,12 +71,13 @@ def build_command(config: dict, prompt: str) -> list:
 
 
 def refresh(key: str) -> dict | None:
-    """Fetch and cache the key's spend; network errors fall back to the cached snapshot."""
+    """Fetch and cache the key's spend; ``None`` when the fetch fails (errors never change the exit)."""
     try:
-        ob.write_snapshot(ob.fetch_key(key), time.time())
-    except (OSError, ValueError):
-        pass
-    return ob.read_snapshot()
+        data = ob.fetch_key(key)
+        ob.write_snapshot(data, time.time())
+        return data
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
 
 
 def start(run: Path, cmd: list) -> subprocess.Popen:
@@ -99,6 +101,20 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def guard(job: dict) -> None:
+    """Codex runs in its own session, so the runner's signals never reach it: forward a kill."""
+    def terminate(signum, frame):
+        if job.get("pid"):
+            try:
+                os.killpg(job["pid"], signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        sys.exit(1)
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, terminate)
+
+
 def supervise(run: Path, key: str, budget: dict, job: dict, alive) -> int:
     """Poll spend while the run is alive; pause the group on an unapproved soft cap."""
     poll = poll_seconds()
@@ -106,6 +122,7 @@ def supervise(run: Path, key: str, budget: dict, job: dict, alive) -> int:
     while alive():
         if time.monotonic() >= next_check:
             next_check = time.monotonic() + poll
+            # Only a snapshot fetched now is judged: over_soft_cap ignores observed_at.
             snapshot = refresh(key)
             window = snapshot and ob.over_soft_cap(snapshot, budget)
             if window and window not in job["approved_windows"]:
@@ -140,7 +157,8 @@ def finish(run: Path, key: str, budget: dict, job: dict) -> int:
             proc = start(run, job["command"])
             job["pid"] = proc.pid
             return supervise(run, key, budget, job, lambda: proc.poll() is None)
-        code = 1 if code in (42, 43) else code  # 42 and 43 are reserved for this contract
+        if IN_FLIGHT_RE.search(text) or code in (42, 43):  # 42 and 43 are reserved for this contract
+            code = 1
     sys.stdout.write(out)
     sys.stderr.write(redact(err))
     return code
@@ -183,6 +201,7 @@ def main(argv: list) -> int:
             run, job = load_paused(argv[1])
             job["approved_windows"] = job["approved_windows"] + [job.pop("window")]
             (run / "paused.json").unlink()
+            guard(job)
             os.killpg(job["pid"], signal.SIGCONT)
             return supervise(run, key, budget, job, lambda: pid_alive(job["pid"]))
         if len(argv) != 1 or not os.path.isfile(argv[0]):
@@ -192,15 +211,18 @@ def main(argv: list) -> int:
     except UsageError as exc:
         print(exc, file=sys.stderr)
         return 2
-    snapshot = refresh(key)
+    refresh(key)
+    snapshot = ob.read_snapshot()  # cap_spent is window-aware, so a stale cache is safe here
     if snapshot and ob.cap_spent(snapshot, budget, time.time()):
         print("OPENROUTER_USAGE_LIMIT")
         return 42
     run_id = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + "-" + secrets.token_hex(3)
     run = runs_dir() / run_id
     run.mkdir(parents=True)
+    job = {"run_id": run_id, "pid": None, "task_file": task_file, "approved_windows": [], "command": cmd}
+    guard(job)
     proc = start(run, cmd)
-    job = {"run_id": run_id, "pid": proc.pid, "task_file": task_file, "approved_windows": [], "command": cmd}
+    job["pid"] = proc.pid
     return supervise(run, key, budget, job, lambda: proc.poll() is None)
 
 

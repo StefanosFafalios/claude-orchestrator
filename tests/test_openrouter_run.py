@@ -1,6 +1,7 @@
 """OpenRouter runner: exit-code contract and pause-and-ask supervision, using a fake codex."""
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -147,3 +148,26 @@ def test_key_never_in_args(tmp_path, env):
     args = (tmp_path / "args").read_text()
     assert KEY not in args
     assert 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"' in args and "--model x/model" in args
+
+
+def test_stale_cached_snapshot_does_not_pause(tmp_path, env, fake_openrouter):
+    ob.write_snapshot({"usage_daily": 5}, time.time() - 2 * 86400)
+    fake_openrouter.server.shutdown()
+    fake_openrouter.server.server_close()
+    assert run(tmp_path, env, FAKE_SLEEP="1", FAKE_OUT="ok")[:2] == (0, "ok")
+
+
+def test_runner_termination_stops_codex(project, tmp_path, env):
+    proc = start(tmp_path, env, FAKE_SLEEP="5")
+    wait_for(lambda: pid_files(project))
+    pid = int(pid_files(project)[0].read_text())
+    proc.send_signal(signal.SIGTERM)
+    proc.communicate(timeout=5)
+    assert proc.returncode == 1
+    wait_for(lambda: state(pid) in (None, "Z"))
+
+
+def test_repeated_in_flight_budget_exits_1(tmp_path, env):
+    code, _, _ = run(tmp_path, env, FAKE_ERR="openrouter_in_flight_budget", FAKE_CODE="2")
+    assert code == 1
+    assert len((tmp_path / "calls").read_text().split()) == 2
