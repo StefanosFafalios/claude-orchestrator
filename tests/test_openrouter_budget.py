@@ -43,6 +43,13 @@ def test_spent_daily_cap_is_limited():
     assert ob.cap_spent(snap(limit_remaining=0), budget(), MID_MONTH) is True
 
 
+def test_stale_key_limit_ignored_after_its_reset():
+    stale = MID_MONTH - 2 * DAY
+    assert ob.cap_spent(snap(observed_at=stale, limit_remaining=0, limit_reset="daily"), budget(), MID_MONTH) is False
+    assert ob.cap_spent(snap(observed_at=stale, limit_remaining=0, limit_reset="monthly"), budget(), MID_MONTH) is True
+    assert ob.cap_spent(snap(observed_at=stale, limit_remaining=0), budget(), MID_MONTH) is True
+
+
 def test_previous_day_spend_does_not_count_today():
     old = snap(observed_at=MID_MONTH - 2 * DAY, usage_daily=5)
     assert ob.windows(old, budget(), MID_MONTH)[0][0] == 0

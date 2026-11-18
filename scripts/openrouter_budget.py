@@ -103,12 +103,16 @@ def _num(value) -> float:
     return float(value) if isinstance(value, (int, float)) else 0.0
 
 
+def _window_starts(now: float) -> tuple:
+    """UTC start of the current day, week (Monday) and month."""
+    day = datetime.fromtimestamp(now, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return day, day - timedelta(days=day.weekday()), day.replace(day=1)
+
+
 def windows(snapshot: dict, budget: dict, now: float) -> list:
     """``(used_pct, resets_at)`` for day, week and month, then the monthly pace window."""
     t = datetime.fromtimestamp(now, timezone.utc)
-    day = t.replace(hour=0, minute=0, second=0, microsecond=0)
-    week = day - timedelta(days=day.weekday())
-    month = day.replace(day=1)
+    day, week, month = _window_starts(now)
     days_in_month = calendar.monthrange(t.year, t.month)[1]
     observed = snapshot["observed_at"]
     out = []
@@ -143,7 +147,10 @@ def over_soft_cap(snapshot: dict, budget: dict) -> str | None:
 def cap_spent(snapshot: dict, budget: dict, now: float) -> bool:
     """A day/week/month window is used up, or the key's own limit is exhausted."""
     remaining = snapshot.get("limit_remaining")
-    if isinstance(remaining, (int, float)) and remaining <= 0:
+    # A key limit observed before its own reset no longer applies.
+    reset = dict(zip(("daily", "weekly", "monthly"), _window_starts(now))).get(snapshot.get("limit_reset"))
+    if isinstance(remaining, (int, float)) and remaining <= 0 and not (
+            reset and snapshot["observed_at"] < reset.timestamp()):
         return True
     # The pace window has no reset time and is capped at 99, so it never counts as spent.
     return any(used >= 100 for used, reset in windows(snapshot, budget, now) if reset is not None)
