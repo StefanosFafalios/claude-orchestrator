@@ -12,6 +12,9 @@ ROLES = ("implementation", "review", "scout", "style_review", "architecture")
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
 LEGACY_KEYS = ("defaults", "codex.tiers", "codex.default_model")
 ASK_ALLOWED = {("review", "supercritical"), ("architecture", "supercritical")}
+# Trivial work is handled directly: nothing routes a scout or a model review for it.
+# Copies of older templates still carry these rows, so they are ignored, not rejected.
+UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial")}
 
 
 def legacy_keys(project_config: dict) -> list[str]:
@@ -40,6 +43,8 @@ def validate(config: dict) -> None:
             if (role, route_name) == ("implementation", "supercritical"):
                 if route_name in rows:
                     raise ConfigError(f"{where} must be absent; supercritical implementation uses the critical row")
+                continue
+            if (role, route_name) in UNUSED:
                 continue
             entry = rows.get(route_name)
             if not isinstance(entry, dict):

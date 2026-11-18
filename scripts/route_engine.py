@@ -145,6 +145,8 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
           implementation_model: str | None = None, exclude: tuple = (), parent_task_id: str | None = None,
           permission_mode: str | None = None, headless: bool = False) -> dict:
     """``implementation_model`` ``"auto"`` derives the implementer from ``task_key``."""
+    if (role, task_route) in model_map.UNUSED:
+        return _none(f"trivial tasks get no {role.replace('_', ' ')}", human=False)
     engines = Engines(config, state)
     entry = dict(model_map.row(config, role, task_route))
     human = False
@@ -170,7 +172,7 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
     result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"])
     if role == "style_review":
         # Skipping style review never needs a human: the main review covers it.
-        if not config.get("review", {}).get("split", True) or task_route == "trivial":
+        if not config.get("review", {}).get("split", True):
             return _none("covered by the main review", human=False)
         if result["engine"] == "none" or engines.status[result["engine"]] != "healthy":
             return _none("both engines constrained; main review covers style", human=False)

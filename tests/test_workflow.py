@@ -102,11 +102,17 @@ def test_failed_style_agent_is_not_a_failure(repo):
     assert out["result"]["lint"] == {"skipped": True}
 
 
-def test_trivial_task_skips_scout_and_plan(repo):
+def test_trivial_task_skips_scout_plan_and_review(repo, write_config):
+    write_config({"commands": {"lint": "echo lint-bad; exit 1"}})
     out = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
-    assert out["result"]["implementation_model"] == "haiku"
-    assert "scout" not in labels(out["calls"]) and "plan" not in labels(out["calls"])
-    assert "review:style" not in labels(out["calls"])
+    result = out["result"]
+    assert result["implementation_model"] == "haiku"
+    assert not [c for c in labels(out["calls"]) if c in ("scout", "plan") or c.startswith("review:")]
+    assert result["review_engine"] == "none"
+    assert result["lint"]["passed"] is False and result["requires_human_review"] is True, "lint gates trivial work"
+    write_config({"commands": {"lint": "echo lint-ok"}})
+    clean = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE}})["result"]
+    assert clean["lint"]["passed"] is True and clean["requires_human_review"] is False
 
 
 def test_critical_task_plans_and_reviews_on_codex(repo):

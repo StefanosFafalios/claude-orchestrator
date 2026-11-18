@@ -1,7 +1,7 @@
 import pytest
 
 from engine_state import ConfigError, load_config
-from model_map import canonical, engine_name, row
+from model_map import UNUSED, canonical, engine_name, row
 from test_route_engine import write_models
 
 
@@ -29,9 +29,15 @@ def test_codex_name_respects_models_cache(config, usage_files):
 
 
 def test_unknown_model_in_routing_is_config_error(write_config):
-    write_config({"routing": {"review": {"trivial": {"models": ["ghost"], "effort": "low"}}}})
+    write_config({"routing": {"review": {"standard": {"models": ["ghost"], "effort": "low"}}}})
     with pytest.raises(ConfigError, match="ghost"):
         load_config()
+
+
+def test_unused_rows_are_ignored(write_config):
+    # Configs copied from older templates still carry these rows; they never route.
+    write_config({"routing": {role: {route: {"models": ["ghost"], "effort": "low"}} for role, route in UNUSED}})
+    load_config()
 
 
 def test_ask_effort_only_for_supercritical_review_or_architecture(write_config):

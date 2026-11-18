@@ -100,9 +100,13 @@ def test_reviewer_never_weaker_than_implementer(config):
     assert stronger["canonical_model"] == "opus" and stronger["requires_human_review"] is False
 
 
+def test_trivial_tasks_get_no_review_or_scout(config):
+    for role in ("review", "style_review", "scout"):
+        r = route(role, "trivial", config, state(), implementation_model="haiku")
+        assert (r["engine"], r["requires_human_review"]) == ("none", False), role
+
+
 def test_review_defaults_by_route(config):
-    trivial = route("review", "trivial", config, state(), implementation_model="haiku")
-    assert trivial["canonical_model"] == "gpt-6-luna" and trivial["requires_human_review"] is False
     complex_ = route("review", "complex", config, state(), implementation_model="sonnet")
     assert complex_["canonical_model"] == "gpt-6.1-sol" and complex_["requires_human_review"] is False
     critical = route("review", "critical", config, state(), implementation_model="opus")

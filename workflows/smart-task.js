@@ -521,7 +521,7 @@ if (testCommand && result.ok !== false) {
 // ---------------------------------------------------------------------------
 phase('Review')
 // The first routing assumed the routed implementer; re-route once the actual one differs or an engine hit its limit.
-if (fallbackEvents.length || tier.model !== routing.IMPLEMENTATION.model) routing = await routeAll('Review', tier.model)
+if (ROUTE !== 'trivial' && (fallbackEvents.length || tier.model !== routing.IMPLEMENTATION.model)) routing = await routeAll('Review', tier.model)
 let review = routing.REVIEW
 let reviewFindings = []
 let reviewEngine = review.engine
@@ -537,17 +537,20 @@ Review the current uncommitted changes (git diff HEAD plus untracked files outsi
 Files reported changed: ${(result.files_changed || []).join(', ') || '(see diff)'}
 Tests: ${tests.skipped ? 'not configured' : `${tests.command} → exit ${tests.exit_code}\n${tests.output_tail}`}${styleReview ? '' : SKIP_NOTE}`
 
-// Cheap standards/best-practice/reduction pass; null means the agent failed.
+// Runs the configured lint command and returns its output for the style reviewer.
 let lintResult = { skipped: true }
+async function runLint() {
+  const lintCommand = ((CONFIG.commands || {}).lint || '').trim()
+  if (!lintCommand) return 'not configured'
+  const l = await bash(`out=$( ( ${lintCommand} ) 2>&1 ); code=$?; printf '%s' "$out" | tail -c 4000; exit $code`, 'lint', 'Review', 600000)
+  lintResult = { command: lintCommand, exit_code: l.exit_code, passed: l.exit_code === 0, output_tail: l.stdout.slice(-2000) }
+  return l.stdout
+}
+
+// Cheap standards/best-practice/reduction pass; null means the agent failed.
 async function runStyleReview() {
   if (!styleReview) return []
-  const lintCommand = ((CONFIG.commands || {}).lint || '').trim()
-  let lint = 'not configured'
-  if (lintCommand) {
-    const l = await bash(`out=$( ( ${lintCommand} ) 2>&1 ); code=$?; printf '%s' "$out" | tail -c 4000; exit $code`, 'lint', 'Review', 600000)
-    lint = l.stdout
-    lintResult = { command: lintCommand, exit_code: l.exit_code, passed: l.exit_code === 0, output_tail: l.stdout.slice(-2000) }
-  }
+  const lint = await runLint()
   const out = await agent(`${reviewBrief}\nLint output (do not repeat these findings):\n${lint}`, {
     agentType: `${PLUGIN}:style-reviewer`, label: 'review:style', phase: 'Review', schema: FINDINGS_SCHEMA,
     model: styleRoute.model, effort: styleRoute.effort,
@@ -574,6 +577,12 @@ function reviewOn(r) {
 if (!result.ok && result.status !== 'partial') {
   reviewEngine = 'none'
   log('review skipped: implementation did not complete')
+} else if (ROUTE === 'trivial') {
+  // No model review for trivial work: tests and lint are the gate.
+  reviewEngine = 'none'
+  await runLint()
+  if (lintResult.passed === false) requiresHumanReview = true
+  log('review skipped: trivial task')
 } else if (review.engine !== 'none') {
   let out
   ;[out, styleFindings] = await Promise.all([reviewOn(review), runStyleReview()])
