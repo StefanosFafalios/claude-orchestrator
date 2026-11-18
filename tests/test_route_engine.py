@@ -104,6 +104,14 @@ def test_reviewer_never_weaker_than_implementer(config):
     assert stronger["canonical_model"] == "opus" and stronger["requires_human_review"] is False
 
 
+def test_review_excludes_every_model_that_wrote_code(project, capsys):
+    """An escalated fix adds a second writer: the reviewer is neither, and at least as capable as both."""
+    from route_engine import main
+    assert main(["--role", "review", "--implementation-model", "gpt-6.1-terra", "--implementation-model", "sonnet"]) == 0
+    r = json.loads(capsys.readouterr().out)
+    assert (r["canonical_model"], r["requires_human_review"]) == ("opus", False)
+
+
 def test_trivial_tasks_get_no_review_or_scout(config):
     for role in ("review", "style_review", "scout"):
         r = route(role, "trivial", config, state(), implementation_model="haiku")

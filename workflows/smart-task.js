@@ -208,8 +208,10 @@ log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 phase('Route')
 const routeCmd = (role, extra = '') => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${ROUTE_FLAGS}${extra}`
 
-// implModel 'auto' lets the router derive the implementer, so review picks a different, at least as capable model.
-async function routeAll(phaseName, implModel = 'auto') {
+// implModels ['auto'] lets the router derive the implementer; otherwise it lists every model that wrote code,
+// so review picks a model that is none of them and at least as capable as the strongest.
+const implFlags = models => models.map(m => ` --implementation-model ${q(m)}`).join('')
+async function routeAll(phaseName, implModels = ['auto']) {
   const r = await bash(
     script([
       `mkdir -p ${q(RUN)}`,
@@ -219,7 +221,7 @@ async function routeAll(phaseName, implModel = 'auto') {
       `echo ===IMPLEMENTATION===`, routeCmd('implementation'),
       `echo ===SCOUT===`, routeCmd('scout'),
       `echo ===ARCHITECTURE===`, routeCmd('architecture'),
-      `echo ===REVIEW===`, routeCmd('review', ` --implementation-model ${q(implModel)}`),
+      `echo ===REVIEW===`, routeCmd('review', implFlags(implModels)),
       `echo ===STYLE_REVIEW===`, routeCmd('style_review'),
     ]),
     'route', phaseName,
@@ -475,9 +477,11 @@ let tier = { model: impl.model, effort: impl.effort }
 let handoffPath = ARGS.handoff && /^[A-Za-z0-9._\/-]+\.md$/.test(ARGS.handoff) ? ARGS.handoff : null
 let result = null
 const enginesUsed = new Set()
+const writers = new Set()  // every model that wrote code; none of them may review it
 
 while (true) {
   enginesUsed.add(engine)
+  writers.add(tier.model)
   if (engine !== 'claude' && !handoffPath) {
     handoffPath = await writeHandoff('claude', engine, '', `${TASK}${context}`, scoutFiles, 'Implement')
   }
@@ -560,6 +564,7 @@ if (testCommand && result.ok !== false) {
       result.files_changed && result.files_changed.length ? result.files_changed : scoutFiles, 'Fix', tests.output_tail)
     const out = await runEngine(a.engine, a.tier, hp)
     enginesUsed.add(a.engine)
+    writers.add(a.tier.model)
     if (out.paused) return stop(out.summary, result.files_changed || [])
     if (out.limited) {
       await markLimit(a.engine, 'Fix')
@@ -575,8 +580,10 @@ if (testCommand && result.ok !== false) {
 
 // ---------------------------------------------------------------------------
 phase('Review')
-// The first routing assumed the routed implementer; re-route once the actual one differs or an engine hit its limit.
-if (ROUTE !== 'trivial' && (fallbackEvents.length || tier.model !== routing.IMPLEMENTATION.model)) routing = await routeAll('Review', tier.model)
+// The first routing assumed the routed implementer; re-route once the actual writers differ or an engine hit its limit.
+if (ROUTE !== 'trivial' && (fallbackEvents.length || writers.size > 1 || tier.model !== routing.IMPLEMENTATION.model)) {
+  routing = await routeAll('Review', [...writers])
+}
 let review = routing.REVIEW
 let reviewFindings = []
 let reviewEngine = review.engine
@@ -666,7 +673,7 @@ if (!result.ok && result.status !== 'partial') {
   if (out && out.exit_code === 42) {
     phase('Fallback')
     await markLimit(review.engine, 'Fallback')
-    const next = await routeRole('review', [review.engine], 'Fallback', ` --implementation-model ${q(tier.model)}`)
+    const next = await routeRole('review', [review.engine], 'Fallback', implFlags([...writers]))
     if (next.engine === 'none') {
       fallbackEvents.push({ phase: 'review', from: review.engine, to: null, reason: `${review.engine} usage limit; no fallback left` })
       requiresHumanReview = true

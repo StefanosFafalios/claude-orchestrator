@@ -142,9 +142,10 @@ def _need_human(result: dict, human: bool) -> dict:
 
 
 def route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
-          implementation_model: str | None = None, exclude: tuple = (), parent_task_id: str | None = None,
+          implementation_model: str | list | None = None, exclude: tuple = (), parent_task_id: str | None = None,
           permission_mode: str | None = None, headless: bool = False) -> dict:
-    """``implementation_model`` ``"auto"`` derives the implementer from ``task_key``."""
+    """``implementation_model`` is one model or every model that wrote code (a fix escalation adds
+    one); ``"auto"`` derives the implementer from ``task_key``."""
     if (role, task_route) in model_map.UNUSED:
         return _none(f"trivial tasks get no {role.replace('_', ' ')}", human=False)
     engines = Engines(config, state)
@@ -156,11 +157,13 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
     if role == "implementation":
         return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"])
     if role == "review":
-        if implementation_model == "auto":
-            implementation_model = route("implementation", task_route, config, state, task_key)["canonical_model"]
-        impl_id = _implementer(config, implementation_model) if implementation_model else None
-        others = [m for m in models if m != impl_id]
-        stronger = [m for m in others if model_map.score(config, m) >= model_map.score(config, impl_id)] if impl_id else others
+        writers = [implementation_model] if isinstance(implementation_model, str) else list(implementation_model or [])
+        writers = [route("implementation", task_route, config, state, task_key)["canonical_model"] if w == "auto" else w
+                   for w in writers]
+        impl_ids = {m for m in (_implementer(config, w) for w in writers if w) if m}
+        others = [m for m in models if m not in impl_ids]
+        bar = max((model_map.score(config, m) for m in impl_ids), default=None)
+        stronger = [m for m in others if model_map.score(config, m) >= bar] if bar is not None else others
         result = _result(config, _select(engines, stronger, exclude=tuple(exclude)), entry["effort"])
         if result["engine"] == "none" and stronger != others:
             # Nothing at least as capable is available: a weaker, different model beats no review.
@@ -184,8 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--role", choices=model_map.ROLES, required=True)
     parser.add_argument("--task-route", choices=model_map.ROUTES, default="standard")
     parser.add_argument("--task-id", help="stable task key; enables the adaptive split")
-    parser.add_argument("--implementation-model",
-                        help="review only: the implementer's model (engine or canonical name, or 'auto' to derive it from --task-id)")
+    parser.add_argument("--implementation-model", action="append",
+                        help="review only: a model that wrote code (engine or canonical name, or 'auto' to derive it "
+                             "from --task-id); repeat for each, e.g. after a fix escalation")
     parser.add_argument("--exclude-engine", action="append", default=[], choices=ENGINES,
                         help="never pick this engine (repeatable)")
     parser.add_argument("--parent-task-id", help="parent task id (supercritical effort)")

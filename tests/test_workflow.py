@@ -368,6 +368,23 @@ def test_scout_cannot_downgrade_critical(repo, write_config):
     assert out["result"]["reroute_events"] == []
 
 
+def test_review_after_escalated_fix_excludes_every_writer(repo, write_config):
+    """Sonnet implements, Codex terra fixes: neither reviews; opus is at least as capable as both."""
+    write_config({"commands": {"test": "grep -q changed app.py 2>/dev/null || { echo FAIL; exit 1; }"},
+                  "balance": {"mode": "off"}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "x"}, "implement:claude": [DONE, DONE],
+        "review:claude": NO_FINDINGS, "review:codex": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    result = out["result"]
+    assert [(e["engine"], e["why"]) for e in result["fix_events"]] == [
+        ("claude", "fix pass on the same engine"), ("codex", "escalation to another engine")]
+    assert result["tests"]["passed"] is True
+    assert result["review_engine"] == "claude" and "review:codex" not in labels(out["calls"])
+    assert next(c for c in out["calls"] if c["label"] == "review:claude")["model"] == "opus"
+    route = next(c for c in out["calls"] if c["label"] == "route" and "'gpt-6.1-terra'" in c["command"])
+    assert "--implementation-model 'sonnet' --implementation-model 'gpt-6.1-terra'" in route["command"]
+
+
 def test_implementer_reroutes_with_handoff(repo, write_config):
     write_config({"balance": {"mode": "off"}})
     partial = dict(DONE, status="partial", completed_work="investigated", remaining_work="finish change",
