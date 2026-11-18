@@ -78,7 +78,8 @@ def test_allows_complex_task_to_architect(project):
 def test_engine_limits_block_matching_agents(project):
     state = project / ".claude" / "engine-state.json"
     state.write_text(json.dumps({"claude": {"status": "limited"}}))
-    assert dispatch(project, "cost-aware-orchestrator:implementer", "add tests")[0] == "deny"
+    decision, reason = dispatch(project, "cost-aware-orchestrator:implementer", "add tests")
+    assert decision == "deny" and "another engine" in reason and "to Codex" not in reason
     state.write_text(json.dumps({"codex": {"status": "limited"}}))
     assert dispatch(project, "cost-aware-orchestrator:codex-reviewer", "review diff")[0] == "deny"
     assert dispatch(project, "cost-aware-orchestrator:implementer", "add tests")[0] == "allow"

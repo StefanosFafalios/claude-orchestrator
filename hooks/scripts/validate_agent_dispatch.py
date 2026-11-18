@@ -39,7 +39,7 @@ def violation(agent: str, prompt: str, root: Path) -> str | None:
     state = load_state(root)
 
     if agent == "implementer" and state["claude"].get("status") == "limited":
-        return "Claude is marked limited: write a handoff and route implementation to Codex instead."
+        return "Claude is marked limited: write a handoff and route implementation to another engine instead."
     if agent == "codex-reviewer":
         engine = "openrouter" if "openrouter_run.py" in prompt else "codex"
         if state[engine].get("status") == "limited":
