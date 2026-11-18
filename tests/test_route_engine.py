@@ -133,6 +133,15 @@ def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, 
         assert r["requires_human_review"] is False and score(config, r["canonical_model"]) >= score(config, model), (model, r)
 
 
+def test_codex_model_missing_from_account_is_served_by_openrouter(write_config, monkeypatch, usage_files):
+    monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    write_models(usage_files, "gpt-6-luna")  # the Codex account lacks gpt-6.1-terra
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"}})
+    result = route("implementation", "standard", load_config(), state())
+    assert (result["engine"], result["model"], result["canonical_model"]) == ("openrouter", "openai/gpt-6.1-terra", "gpt-6.1-terra")
+
+
 def test_shipped_top_models_only_in_supercritical_rows():
     routing = json.loads(TEMPLATE.read_text())["routing"]
     for role, rows in routing.items():
