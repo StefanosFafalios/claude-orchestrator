@@ -49,7 +49,8 @@ Steps:
 
    If the Workflow tool is not available in this session, run the same steps inline
    instead, following the `cost-aware-orchestration` skill: route with
-   `route_engine.py`, dispatch the `scout`, `architect`, `implementer` and
+   `route_engine.py`, dispatch the `scout`, `researcher` (only when the decider flagged
+   `needs_research`), `architect`, `implementer` and
    `verifier`/`codex-reviewer` agents with the routed model and effort, run the
    configured test command, and apply the same exit-42 fallback and handoff rules.
    Report that the run was inline.

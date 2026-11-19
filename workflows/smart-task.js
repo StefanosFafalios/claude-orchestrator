@@ -7,6 +7,7 @@ export const meta = {
     { title: 'Classify', detail: 'cheap OpenRouter decider, else the keyword classifier' },
     { title: 'Route', detail: 'engine state, config and routing decisions' },
     { title: 'Scout', detail: 'cheap repository lookup for nontrivial tasks' },
+    { title: 'Research', detail: 'web research for nontrivial tasks the decider flags as needing outside knowledge' },
     { title: 'Plan', detail: 'architect pass for complex, critical or supercritical tasks' },
     { title: 'Implement', detail: 'routed engine implements' },
     { title: 'Test', detail: 'configured project test command' },
@@ -120,7 +121,13 @@ const PLAN_SCHEMA = {
     risks: { type: 'array', items: { type: 'string' } },
     test_strategy: { type: 'string' },
     rollback: { type: 'string' },
+    research_query: { type: 'string', description: 'a generic question (no code, paths or project names), only if outside knowledge is still needed' },
   },
+}
+const RESEARCH_SCHEMA = {
+  type: 'object',
+  required: ['report'],
+  properties: { report: { type: 'string', description: 'findings, then each source URL with its date, then open uncertainties' } },
 }
 const IMPL_SCHEMA = {
   type: 'object',
@@ -302,13 +309,13 @@ const WRAPPERS = {
 }
 
 // ponytail: one Bash call caps a wrapper run at 10 minutes; split larger work into handoffs.
-// `prompt`, when given, is first written to `file`.
-async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt) {
+// `prompt`, when given, is first written to `file`; `env` is extra environment assignments for the wrapper.
+async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, env = '') {
   const out = `${RUN}/${engine}`
   const res = await bash([
     `mkdir -p ${q(RUN)}`,
     ...(prompt === undefined ? [] : [heredoc(file, prompt)]),
-    `${WRAPPERS[engine](r, sandbox)} ${q(file)} > ${q(`${out}.out`)} 2> ${q(`${out}.err`)}; code=$?`,
+    `${env}${WRAPPERS[engine](r, sandbox)} ${q(file)} > ${q(`${out}.out`)} 2> ${q(`${out}.err`)}; code=$?`,
     `echo ===OUTPUT===; tail -c 3000 ${q(`${out}.out`)}; echo; tail -c 1000 ${q(`${out}.err`)}`,
     `echo ===FILES===; { git diff --name-only HEAD 2>/dev/null || git diff --name-only; git ls-files --others --exclude-standard; } | sort -u`,
     `if [ "$code" = 43 ]; then run=$(sed -n 's/^OPENROUTER_PAUSED //p' ${q(`${out}.out`)} | tail -n 1); echo ===PAUSED===; echo "$run"; ` +
@@ -351,6 +358,7 @@ async function writeHandoff(source, target, completed, remaining, files, phaseNa
 let scoutFiles = []
 let context = ''
 let planned = false
+let researched = false
 
 // Architect plan for complex and harder work; appends to `context`, runs at most once.
 // Returns a stop result when a human must act first, otherwise null.
@@ -373,6 +381,7 @@ async function plan() {
       agentType: `${PLUGIN}:architect`, label: 'plan', phase: 'Plan', schema: PLAN_SCHEMA, model: ar.model, effort: ar.effort,
     })
     if (p) {
+      if (p.research_query && !researched) await researchPass(p.research_query)
       context += `\n\nArchitect plan:\n${p.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\nRisks: ${p.risks.join('; ')}\nTest strategy: ${p.test_strategy}`
       if (p.rollback) context += `\nRollback: ${p.rollback}`
     }
@@ -424,6 +433,53 @@ async function scoutPass() {
   }
 }
 
+// Web research on the routed engine; appends the report to `context`. The query is a generic question: OpenRouter
+// never sees the task text, so without a query it is excluded. A failed or skipped step never blocks the task.
+async function researchPass(query) {
+  researched = true
+  phase('Research')
+  const prompt = `Task (${ROUTE}): ${TASK}\n${query ? `Research question: ${query}\n` : ''}\nFind the outside knowledge this task needs (current docs, API facts, recent changes) ` +
+    `and return a short sourced report. Search only with generic queries: never include code, paths, project names or secrets.`
+  const exclude = query ? [] : ['openrouter']
+  let rr = await routeRole('research', exclude, 'Research')
+  while (true) {
+    if (rr.engine === 'none' || rr.scope === 'single_atomic_task' || rr.requires_human_review) {
+      log(`research skipped: ${rr.engine === 'none' ? rr.reason : `${rr.engine} is constrained`}`)
+      return
+    }
+    let code = 0, report = ''
+    if (rr.engine === 'claude') {
+      const r = await agent(prompt, {
+        agentType: `${PLUGIN}:researcher`, label: 'research', phase: 'Research', schema: RESEARCH_SCHEMA, model: rr.model, effort: rr.effort,
+      })
+      code = r ? 0 : 1
+      report = r ? r.report : ''
+    } else if (rr.engine === 'codex') {
+      const w = await runWrapper('codex', rr, `${RUN}/research.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ')
+      code = w.code
+      report = w.output.slice(-3000)
+    } else {
+      const file = `${RUN}/research-query.txt`
+      const w = await bash(
+        `mkdir -p ${q(RUN)}\n${heredoc(file, query)}\n${PY('research_run.py')} --query-file ${q(file)} --model ${q(rr.model)}${rr.effort ? ` --effort ${q(rr.effort)}` : ''}`,
+        'research:openrouter', 'Research', 600000,
+      )
+      code = w.exit_code
+      report = w.stdout.slice(-3000)
+    }
+    if (code !== 42) {
+      if (code === 0 && report) context += `\n\nResearch report (${rr.model}):\n${report}`
+      else log(`research failed (${rr.engine} exit ${code}); continuing without it`)
+      return
+    }
+    await markLimit(rr.engine, 'Research')
+    exclude.push(rr.engine)
+    const next = await routeRole('research', exclude, 'Research')
+    fallbackEvents.push({ phase: 'research', from: rr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${rr.engine} usage limit` })
+    rr = next
+  }
+}
+
 // A resumed handoff already carries its context: no scout or plan.
 if (ROUTE !== 'trivial' && !ARGS.handoff) {
   phase('Scout')
@@ -431,6 +487,9 @@ if (ROUTE !== 'trivial' && !ARGS.handoff) {
   if (scoutStop) return scoutStop
 }
 if (impl.engine === 'none') return noEngine()
+if (ROUTE !== 'trivial' && !ARGS.handoff && classification.needs_research === true) {
+  await researchPass(typeof classification.research_query === 'string' ? classification.research_query.trim() : '')
+}
 const planStop = await plan()
 if (planStop) return planStop
 

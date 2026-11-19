@@ -8,7 +8,7 @@ and quota deliberately:
   cheapest sufficient Claude model and effort.
 - **Tiered subagents**: `scout` (haiku/low), `implementer` (sonnet/medium),
   `architect` (opus/high), `verifier` (sonnet/medium), `style-reviewer` (haiku/low), `doc-updater`
-  (haiku/low), and `codex-reviewer`.
+  (haiku/low), `researcher` (sonnet/medium), and `codex-reviewer`.
 - **Three engines**: Claude, plus optional Codex (your local Codex CLI) and optional
   OpenRouter (pay-per-token, under a yearly allowance you choose; off by default).
 - **Quota fallback**: when an engine is near or at its limit, the remaining work goes
@@ -278,13 +278,22 @@ The default `models` catalog lists each canonical model once, with its name per 
 (for example the Claude alias and the OpenRouter slug for the same model) and one
 composite capability `score`; the benchmark evidence, sources, dates and prices behind each
 score live in the maintainers' decision log (`map_meta.log`). The `routing` section ranks
-models per role (implementation, review, scout, style review, architecture, docs, decider)
+models per role (implementation, review, scout, style review, architecture, docs, decider, research)
 and tier, with an effort. Every listed model clears that tier's bar, so work is split by
 headroom across the engines that can serve one. Because identity is per model, not per
 engine, "same model" and "at least as capable" are decided correctly across engines.
 Override any row in your project config. The shipped defaults are a starting point, not a
 requirement. Maintainers refresh them with the repo-only `review-models` skill
 (`.claude/skills/review-models/`), which is not shipped with the plugin.
+
+## Web research
+
+When the cheap decider flags that a nontrivial task needs outside knowledge, `/smart-task` runs a
+research step before planning on the cheapest healthy engine that can search: the `researcher` agent,
+Codex with its search switch, or OpenRouter's `sonar` models. Queries are generic, redacted and capped;
+OpenRouter never sees the task text. Failures never block the task. The `Cost:` line a report
+prints is not written to the cached spend snapshot, so the cap check can lag until the next `/key`
+refresh and several deep-research calls in a row can overshoot a cap.
 
 ## OpenRouter
 
