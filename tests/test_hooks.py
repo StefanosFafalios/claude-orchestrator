@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from conftest import ROOT
 
@@ -358,3 +359,58 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     text = context(project, "add a button")
     assert "decide_route.py" not in text
+
+
+def test_directive_research_only_when_configured(project):
+    text = context(project, "add a button")
+    assert text.count("run the researcher agent per research= first") == 1
+    assert "research=haiku/low" in next(line for line in text.splitlines() if line.startswith("standard:"))
+    assert text.count("researcher") == 1 and "CODEX_SEARCH" not in text
+    assert "research=" not in next(line for line in text.splitlines() if line.startswith("trivial:"))
+    path = Path(os.environ["ORCHESTRATOR_DEFAULT_CONFIG"])
+    config = json.loads(path.read_text())
+    del config["routing"]["research"]
+    path.write_text(json.dumps(config))
+    assert "research" not in context(project, "add a button").lower()
+
+
+def test_directive_research_hints_follow_the_engine(project, write_config, monkeypatch):
+    state = project / ".claude" / "engine-state.json"
+    default = context(project, "add a button")
+    assert "CODEX_SEARCH" not in default and "research_run.py" not in default
+    state.write_text(json.dumps({"claude": {"status": "limited", "remaining_pct": 0}}))
+    codex = context(project, "add a button")
+    assert "research=Codex/" in codex
+    assert codex.count("CODEX_SEARCH=1") == 1 and "research_run.py" not in codex
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    write_config({"engines": {"openrouter": True},
+                  "models": {"or-cheap": {"score": 56, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"implementation": {"standard": {"models": ["or-cheap"], "effort": "low"}}}})
+    state.write_text(json.dumps({"claude": {"status": "limited", "remaining_pct": 0},
+                                 "codex": {"status": "limited", "remaining_pct": 0}}))
+    router = context(project, "add a button")
+    assert "research=OpenRouter/" in router
+    assert router.count("research_run.py --query-file") == 1 and "CODEX_SEARCH" not in router
+
+
+def test_research_alone_adds_no_general_wrapper_engine(project, write_config, monkeypatch):
+    sys.path.insert(0, str(HOOKS))
+    from engine_state import load_config, load_synced_state
+    from inject_orchestration_context import steps_for
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    row = lambda models: {"standard": {"models": models, "effort": "low"}}  # noqa: E731
+    for models, label in ((["sonar"], "research=OpenRouter/"), (["gpt-6.1-terra"], "research=Codex/")):
+        write_config({"engines": {"openrouter": True}, "routing": {
+            "implementation": row(["sonnet"]), "review": row(["opus"]), "style_review": row(["haiku"]),
+            "docs": row(["haiku"]), "research": row(models)}})
+        config = load_config(project)
+        row_text, used, _, _ = steps_for("standard", config, load_synced_state(config, project), "k")
+        assert label in row_text and used == {"claude"}, "the research hint line covers its engine"
+
+
+def test_research_hidden_when_it_needs_human_review(project):
+    (project / ".claude" / "engine-state.json").write_text(json.dumps({
+        "claude": {"status": "near_limit", "remaining_pct": 10}, "codex": {"status": "near_limit", "remaining_pct": 10}}))
+    text = context(project, "add a button")
+    standard = next(line for line in text.splitlines() if line.startswith("standard:"))
+    assert "implement=" in standard and "research=" not in standard

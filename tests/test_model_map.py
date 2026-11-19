@@ -88,3 +88,13 @@ def test_decider_row_is_optional_and_single():
     assert row(template, "decider", "critical") == template["routing"]["decider"]["standard"]
     del template["routing"]["decider"]
     validate(template)  # configs from before the decider simply have none
+
+
+def test_research_rows_are_optional_and_trivial_is_unused(write_config):
+    template = json.loads(TEMPLATE.read_text())
+    assert ("research", "trivial") in UNUSED and "trivial" not in template["routing"]["research"]
+    assert template["routing"]["research"]["standard"] == {"models": ["haiku", "gpt-6.1-terra", "sonar"], "effort": "low"}
+    assert all("fable" not in r["models"] for r in template["routing"]["research"].values())
+    assert engine_name(template, "sonar-deep-research", "openrouter") == "perplexity/sonar-deep-research"
+    del template["routing"]["research"]
+    validate(template)  # configs from before research simply never research

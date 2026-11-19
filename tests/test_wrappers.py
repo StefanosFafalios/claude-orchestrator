@@ -88,3 +88,23 @@ def test_claude_permission_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PERMISSION_MODE", "plan")
     run("claude_with_fallback.sh", tmp_path, "CLAUDE_BIN", stdout="ok")
     assert "--permission-mode plan" in (tmp_path / "args").read_text()
+
+
+@pytest.mark.parametrize("value, expected", [("1", True), ("", False), ("0", False)])
+def test_codex_search_flag(tmp_path, monkeypatch, value, expected):
+    monkeypatch.setenv("CODEX_SEARCH", value)
+    run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stdout="ok")
+    words = (tmp_path / "args").read_text().split()
+    assert ("--search" in words) is expected
+    if expected:
+        assert words.index("--search") < words.index("exec")
+
+
+@pytest.mark.parametrize("value, expected", [("/tmp/last.md", True), ("", False)])
+def test_codex_last_message_flag(tmp_path, monkeypatch, value, expected):
+    monkeypatch.setenv("CODEX_LAST_MESSAGE", value)
+    run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stdout="ok")
+    words = (tmp_path / "args").read_text().split()
+    assert ("-o" in words) is expected
+    if expected:
+        assert words[words.index("-o") + 1] == value and words.index("exec") < words.index("-o")

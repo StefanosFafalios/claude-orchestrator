@@ -3,7 +3,7 @@
 #
 # Usage: codex_with_fallback.sh <task-or-handoff-file>
 # Exit codes: 0 success, 42 usage limit (prints CODEX_USAGE_LIMIT), 1 other failure, 2 bad usage.
-# Env: CODEX_BIN (default: codex), CODEX_MODEL, CODEX_EFFORT (low|medium|high),
+# Env: CODEX_BIN (default: codex), CODEX_MODEL, CODEX_EFFORT (low|medium|high), CODEX_SEARCH (1 = --search), CODEX_LAST_MESSAGE (file for the final message),
 #      CODEX_SANDBOX (read-only|workspace-write; default read-only).
 set -uo pipefail
 
@@ -20,9 +20,12 @@ out_file=$(mktemp)
 err_file=$(mktemp)
 trap 'rm -f "$out_file" "$err_file"' EXIT
 
-args=(exec --sandbox "${CODEX_SANDBOX:-read-only}")
+args=()
+[[ "${CODEX_SEARCH:-}" == 1 ]] && args+=(--search)  # top-level option: must precede exec
+args+=(exec --sandbox "${CODEX_SANDBOX:-read-only}")
 [[ -n "${CODEX_MODEL:-}" ]] && args+=(--model "$CODEX_MODEL")
 [[ -n "${CODEX_EFFORT:-}" ]] && args+=(-c "model_reasoning_effort=\"$CODEX_EFFORT\"")
+[[ -n "${CODEX_LAST_MESSAGE:-}" ]] && args+=(-o "$CODEX_LAST_MESSAGE")  # exec option: the final message, untruncated
 args+=("$(cat "$1")")
 
 "${CODEX_BIN:-codex}" "${args[@]}" </dev/null >"$out_file" 2>"$err_file"

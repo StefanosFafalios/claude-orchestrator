@@ -171,3 +171,12 @@ def test_repeated_in_flight_budget_exits_1(tmp_path, env):
     code, _, _ = run(tmp_path, env, FAKE_ERR="openrouter_in_flight_budget", FAKE_CODE="2")
     assert code == 1
     assert len((tmp_path / "calls").read_text().split()) == 2
+
+
+@pytest.mark.parametrize("value, expected", [("/tmp/last.md", True), ("", False)])
+def test_last_message_flag_is_passed_only_when_set(tmp_path, env, value, expected):
+    code, _, _ = run(tmp_path, env, OPENROUTER_LAST_MESSAGE=value)
+    words = (tmp_path / "args").read_text().split()
+    assert code == 0 and ("-o" in words) is expected
+    if expected:
+        assert words[words.index("-o") + 1] == value and words.index("exec") < words.index("-o")

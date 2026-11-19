@@ -626,3 +626,151 @@ def test_workflow_uses_decider_route_and_falls_back_to_keywords(repo, write_conf
     calls = len(fake_openrouter.chat_requests)
     out = run(repo, {"task": "add unit tests for parser", "args": {"decider": False}, "agents": SCOUT_AGENTS})
     assert out["result"]["route"] == "standard" and len(fake_openrouter.chat_requests) == calls
+
+
+RESEARCH = {"report": "Library 2.0 renamed connect() to open() (docs, 2026-05)."}
+QUERY = "What changed in library 2.0?"
+FLAGGED = {"route": "standard", "reason": "test", "needs_research": True}
+
+
+def research_run_calls(out):
+    return [c for c in out["calls"] if c["kind"] == "bash" and "research_run.py" in c["command"]]
+
+
+def test_unflagged_or_nonboolean_flag_does_not_research(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    for flag in ({}, {"needs_research": "yes"}):
+        out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {
+            "route": "standard", "reason": "test", **flag}}, "agents": dict(SCOUT_AGENTS, research=RESEARCH)})
+        assert not [label for label in labels(out["calls"]) if "research" in label]
+
+
+def test_trivial_flagged_task_skips_research(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "fix typo in README", "args": {"classification": dict(FLAGGED, route="trivial")},
+                     "agents": {"implement:claude": DONE, "research": RESEARCH}})
+    assert not [label for label in labels(out["calls"]) if "research" in label]
+
+
+def test_flagged_task_researches_before_plan_and_feeds_both_prompts(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, route="complex", research_query=QUERY)},
+                     "agents": dict(SCOUT_AGENTS, plan=PLAN, research=RESEARCH)})
+    order = labels(out["calls"])
+    assert order.index("research") < order.index("plan")
+    research = next(c for c in out["calls"] if c["label"] == "research")
+    assert research["agentType"] == "cost-aware-orchestrator:researcher" and QUERY in research["prompt"]
+    calls = {c["label"]: c for c in out["calls"]}
+    assert RESEARCH["report"] in calls["plan"]["prompt"] and RESEARCH["report"] in calls["implement:claude"]["prompt"]
+    saved = next((repo / ".claude" / "orchestrator" / "runs").glob("*/research.md")).read_text()
+    assert saved.startswith("Research report (") and RESEARCH["report"] in saved
+
+
+def test_research_runs_on_openrouter_with_the_generic_query_only(repo, openrouter, fake_openrouter):
+    openrouter(routing={"research": {"standard": {"models": ["sonar", "haiku"], "effort": "low"}}})
+    set_state(repo, claude="limited", codex="limited")
+    fake_openrouter.chat_body = fake_openrouter.answer("Library 2.0 renamed connect().")
+    task = "update the parser"
+    out = run(repo, {"task": task, "args": {"classification": dict(FLAGGED, research_query=QUERY)}, "agents": {}})
+    command = research_run_calls(out)[0]["command"]
+    assert "--model 'perplexity/sonar'" in command
+    query_file = next((repo / ".claude" / "orchestrator" / "runs").glob("*/research-query.txt"))
+    assert query_file.read_text().strip() == QUERY
+    sent = [json.loads(r["body"]) for r in fake_openrouter.chat_requests if "perplexity" in r["body"]]
+    assert sent and task not in json.dumps(sent)
+
+
+def test_openrouter_research_without_a_generic_query_is_skipped(repo, openrouter, fake_openrouter):
+    openrouter()
+    set_state(repo, claude="limited", codex="limited")
+    out = run(repo, {"task": "update the parser", "args": {"classification": FLAGGED}, "agents": {}})
+    assert not research_run_calls(out)
+    assert not [r for r in fake_openrouter.chat_requests if "perplexity" in r["body"]]
+
+
+def test_openrouter_research_limit_marks_it_and_the_task_continues(repo, write_config, monkeypatch, fake_openrouter):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                  "routing": {"research": {"standard": {"models": ["sonar", "haiku"], "effort": "low"}}}})
+    fake_openrouter.chat_status = 402
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, research_query=QUERY)},
+                     "agents": dict(SCOUT_AGENTS, research=RESEARCH)})
+    assert [c["exit_code"] for c in research_run_calls(out)] == [42]
+    assert state(repo)["openrouter"]["status"] == "limited"
+    assert {"phase": "research", "from": "openrouter", "to": "claude", "reason": "openrouter usage limit"} in out["result"]["fallback_events"]
+    assert RESEARCH["report"] in next(c for c in out["calls"] if c["label"] == "implement:claude")["prompt"]
+
+
+def test_research_failing_on_every_engine_still_implements(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, research_query=QUERY)},
+                     "agents": SCOUT_AGENTS})
+    assert "research" in labels(out["calls"]) and out["result"]["implementation_engine"] == "claude"
+    assert any("research failed" in line for line in out["logs"])
+
+
+def test_codex_research_uses_search_and_read_only_sandbox(repo, write_config):
+    write_config({"balance": {"mode": "off"}, "routing": {"research": {"standard": {"models": ["gpt-6.1-terra", "haiku"], "effort": "low"}}}})
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, research_query=QUERY)},
+                     "agents": SCOUT_AGENTS})
+    command = next(c for c in out["calls"] if c["label"] == "research:codex")["command"]
+    assert "CODEX_SEARCH=1" in command and "CODEX_SANDBOX=read-only" in command
+
+
+def long_codex(write_config, monkeypatch, tmp_path, body, route, role):
+    """Fake Codex that writes `body` to its -o file and a long stdout, so only the file keeps the start."""
+    codex = tmp_path / "codex-long"
+    codex.write_text('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf "%s" "$BODY" > "$2"; shift; done\n'
+                     'echo "START-OF-STDOUT"; head -c 5000 /dev/zero | tr "\\0" x; echo\n')
+    codex.chmod(0o755)
+    monkeypatch.setenv("CODEX_BIN", str(codex))
+    monkeypatch.setenv("BODY", body)
+    write_config({"balance": {"mode": "off"}, "routing": {role: {route: {"models": ["gpt-6.1-terra", "haiku"], "effort": "low"}}}})
+
+
+CODEX_ROLES = [("research", "standard", "Research report"), ("scout", "standard", "Scout findings"),
+               ("architecture", "complex", "Architect plan")]
+
+
+@pytest.mark.parametrize("role, route, heading", CODEX_ROLES)
+@pytest.mark.parametrize("body, kept", [("FINDINGS-FIRST " + "y" * 5000, "FINDINGS-FIRST"), ("", "x" * 100)])
+def test_long_codex_answer_keeps_its_start(repo, write_config, monkeypatch, tmp_path, role, route, heading, body, kept):
+    long_codex(write_config, monkeypatch, tmp_path, body, route, role)
+    classification = dict(FLAGGED, route=route, research_query=QUERY if role == "research" else "")
+    out = run(repo, {"task": "update the parser", "args": {"classification": classification},
+                     "agents": dict(SCOUT_AGENTS, plan=PLAN, research=RESEARCH)})
+    prompt = next(c for c in out["calls"] if c["label"] == "implement:claude")["prompt"]
+    section = prompt[prompt.index(heading):]
+    assert kept in section
+    assert "START-OF-STDOUT" not in section
+
+
+def test_architect_research_query_runs_one_research_after_plan(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
+    out = run(repo, {"task": "update the parser", "args": {"classification": {"route": "complex", "reason": "test"}},
+                     "agents": dict(SCOUT_AGENTS, plan=dict(PLAN, research_query=QUERY), research=RESEARCH)})
+    order = labels(out["calls"])
+    assert order.count("research") == 1 and order.index("plan") < order.index("research")
+    calls = {c["label"]: c for c in out["calls"]}
+    assert RESEARCH["report"] not in calls["plan"]["prompt"] and RESEARCH["report"] in calls["implement:claude"]["prompt"]
+
+
+def test_long_research_report_keeps_its_first_characters(repo, openrouter, fake_openrouter):
+    openrouter(routing={"research": {"standard": {"models": ["sonar", "haiku"], "effort": "low"}}})
+    set_state(repo, claude="limited", codex="limited")
+    fake_openrouter.chat_body = fake_openrouter.answer("FINDINGS-FIRST " + "x" * 4000 + " LAST-WORDS")
+    run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, research_query=QUERY)}, "agents": {}})
+    handoffs = list((repo / ".claude" / "orchestrator" / "handoffs").glob("*.md"))
+    text = "".join(h.read_text() for h in handoffs)
+    assert "FINDINGS-FIRST" in text and "LAST-WORDS" not in text
+
+
+def test_skipped_research_does_not_block_the_architect_query(repo, openrouter, fake_openrouter):
+    openrouter(routing={"research": {"complex": {"models": ["sonar"], "effort": "low"}}})
+    fake_openrouter.chat_body = fake_openrouter.answer("Library 2.0 renamed connect().")
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, route="complex")},
+                     "agents": dict(SCOUT_AGENTS, plan=dict(PLAN, research_query=QUERY))})
+    assert any("research skipped" in line for line in out["logs"])
+    assert len(research_run_calls(out)) == 1 and "--model 'perplexity/sonar'" in research_run_calls(out)[0]["command"]
+    order = labels(out["calls"])
+    assert order.index("plan") < order.index("research:openrouter")

@@ -6,7 +6,7 @@ Exit codes: 0 success, 42 budget/usage limit (prints OPENROUTER_USAGE_LIMIT), 43
 over a soft cap (prints OPENROUTER_PAUSED <run-id>), 1 other failure, 2 bad usage.
 Env: OPENROUTER_MODEL (required), OPENROUTER_EFFORT, OPENROUTER_SANDBOX (read-only |
 workspace-write; default read-only), CODEX_BIN (default codex), OPENROUTER_POLL_SECONDS
-(default 30). The API key is read from the environment variable named in the config and
+(default 30), OPENROUTER_LAST_MESSAGE (file for the final message). The API key is read from the environment variable named in the config and
 is never placed on the command line: Codex reads it through ``env_key``.
 """
 
@@ -67,6 +67,8 @@ def build_command(config: dict, prompt: str) -> list:
     cmd = [os.environ.get("CODEX_BIN") or "codex", "exec", "--sandbox", sandbox, "--model", model]
     for name, value in overrides.items():
         cmd += ["-c", f"{name}={json.dumps(value)}"]
+    if os.environ.get("OPENROUTER_LAST_MESSAGE"):
+        cmd += ["-o", os.environ["OPENROUTER_LAST_MESSAGE"]]  # exec option: the final message, untruncated
     return cmd + [prompt]
 
 

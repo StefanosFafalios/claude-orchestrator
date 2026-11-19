@@ -48,7 +48,10 @@ Workflow:
    Any script exiting 2 means invalid configuration: report the error and stop.
 5. Use the selected Claude model and effort for normal work. Trivial tasks: do them
    directly, no subagents, no review fan-out.
-6. Use the `scout` agent for repository exploration.
+6. Use the `scout` agent for repository exploration. When a nontrivial task needs outside
+   knowledge (current docs, API facts, recent changes), use `route_engine.py --role research`
+   and the `researcher` agent (Codex runs with `CODEX_SEARCH=1`, OpenRouter through
+   `research_run.py`); the query must be generic, with no code, paths or project names.
 7. Use the `implementer` agent for standard implementation.
 8. Use the `architect` agent for critical work, and for complex work if the design or root cause is unclear.
    `supercritical` work (frontier reasoning) goes to the top model, which only reasons, maps

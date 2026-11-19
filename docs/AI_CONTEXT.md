@@ -43,6 +43,13 @@ that no healthy Claude or Codex engine serves (a later one in the row if needed)
 `routing.decider` row, clamped to the keyword floor; exit 3 (never 42) hands classification
 back to the session model and marks nothing. It also reports `confidence`, `alternative` and
 `ask` (confidence below `decider.min_confidence`, default 0.9): the session then asks the user.
+`scripts/research_run.py` is the OpenRouter research runner (one chat call, redacted and capped
+generic query, report with sources; exit 42 on a usage limit). `workflows/smart-task.js`
+`researchPass` runs it, the `researcher` agent or Codex with `CODEX_SEARCH=1` when the decider
+flags `needs_research`; OpenRouter never receives the task text. The `Cost:` line a research report
+prints is not written to the cached spend snapshot, so the cap check can lag until the next `/key`
+refresh. The `sonar` models' `score` values are placeholders, not coding scores: keep them out of
+review and implementation rows.
 `scripts/usage_sources.py` reads observed quota from local files only (Claude status line
 input, Codex session logs); `engine_state.sync_usage` applies it. Tests must isolate both
 sources (the autouse `usage_files` fixture) and never read the real `~/.claude` or `~/.codex`.

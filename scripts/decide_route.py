@@ -2,7 +2,7 @@
 """Cheap tier decider: one OpenRouter call classifies a prompt by the hook rubric.
 
 Usage: decide_route.py [--prompt-file F]  (default: the prompt on stdin)
-Exit 0 prints ``{"route", "reason", "model", "confidence", "alternative", "ask"}``; the route
+Exit 0 prints ``{"route", "reason", "model", "confidence", "alternative", "ask", "needs_research"[, "research_query"]}``; the route
 never falls below the keyword safety floor and never rises above ``critical`` (a
 ``supercritical`` answer is reported in ``reason``). ``ask`` means confidence is below
 ``decider.min_confidence`` (default 0.9) and a distinct ``alternative`` remains: the session asks the user. Exit 3 means "fallback: the session model classifies": OpenRouter is off,
@@ -30,6 +30,8 @@ MAX_PROMPT_CHARS = 8000
 INSTRUCTIONS = (f"Classify the coding task in the user message into one tier. {RUBRIC} "
                 'Reply with JSON only: {"route": "<tier>", "confidence": <0..1>, '
                 '"alternative": "<next most likely tier>", "type": "<frontend|debug|refactor|tests|docs or general>", '
+                '"needs_research": <true only if outside knowledge such as docs or recent facts is needed>, '
+                '"research_query": "<generic question, no project names, code or paths; only if needs_research>", '
                 '"reason": "<at most 20 words>"}.')
 
 
@@ -115,6 +117,13 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
     detected_type = task_type(answer.get("type"))
     if detected_type is not None:
         result["type"] = detected_type
+    if answer.get("needs_research") is True:
+        query = answer.get("research_query")
+        result["needs_research"] = True
+        if isinstance(query, str) and query.strip():
+            result["research_query"] = redact(query.strip())[:300]
+    else:
+        result["needs_research"] = False
     return result
 
 

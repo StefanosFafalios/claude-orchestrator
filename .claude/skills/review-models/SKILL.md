@@ -9,7 +9,7 @@ Maintainer-only (lives in this repo's `.claude/skills/`, not shipped). Updates t
 map in `templates/orchestrator.config.json`:
 
 - `models`: canonical model id -> `{score, engines: {claude|codex|openrouter: name}}`
-- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`, `decider`) ->
+- `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`, `decider`, `research`) ->
   route (`trivial`, `standard`, `complex`, `critical`, `supercritical`) ->
   `{models: [ranked ids], effort}`. Supercritical effort is `"medium"` (owner rule: never higher unless the user names it). `implementation.supercritical`
   reuses the critical row: top models never implement.
@@ -63,6 +63,10 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   that reliably return tool-free JSON, score bar about the trivial implementation bar,
   cheapest-first, effort `low`. Only its OpenRouter names are used; a config without
   `routing.decider` has no decider.
+- `research` rows come from search/research benchmarks, not coding scores: subscription models
+  first, then OpenRouter-only search models (`sonar`, `sonar-reasoning-pro`, `sonar-deep-research`),
+  never `fable`. Their `score` values are placeholders: keep them out of review and implementation rows.
+  A config without `routing.research` never researches.
 - Trivial tasks get no scout and no model review: there are no `review`, `style_review`,
   `scout` or `docs` rows for `trivial` (`model_map.UNUSED`).
 - The same canonical model on several engines is one `models` entry with several `engines`
