@@ -83,19 +83,24 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
     decided = answer.get("route")
     if decided not in ROUTES:
         raise Fallback(f"invalid route {decided!r}")
+    raw_decided = decided
     reason = f"decider ({picked['model']}): {str(answer.get('reason', ''))[:200]}"
     confidence = answer.get("confidence")
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or confidence != confidence:
         confidence = 0.0  # conservative: no usable confidence means ask
     confidence = min(max(float(confidence), 0.0), 1.0)
     alternative = answer.get("alternative")
+    raw_alternative = alternative
     if alternative not in ROUTES or alternative == decided:
         alternative = ROUTES[ROUTES.index(decided) + 1] if decided != ROUTES[-1] else None
-    if "supercritical" in (decided, alternative):
-        # The route is a binding floor, and supercritical gets none: a prompt-only guess must not
-        # force the top model. The session may still raise to supercritical from context.
-        decided = "critical" if decided == "supercritical" else decided
-        alternative = "critical" if alternative == "supercritical" else alternative
+    # The route is a binding floor, and supercritical gets none: a prompt-only guess must not
+    # force the top model. The session may still raise to supercritical from context.
+    if decided == "supercritical":
+        # critical is the cap and already sits between the model's candidates: nothing to ask.
+        decided, alternative = "critical", None
+    elif alternative == "supercritical":  # also the synthesised default above a critical route
+        alternative = "critical"
+    if "supercritical" in (raw_decided, raw_alternative):  # only what the model actually said
         reason = f"{reason}; suggests supercritical"
     floor = classify(prompt)  # the raw prompt: redaction would hide credential keywords
     if floor["route"] in FLOOR_ROUTES and ROUTES.index(decided) < ROUTES.index(floor["route"]):

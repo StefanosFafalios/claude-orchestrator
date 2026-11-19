@@ -292,12 +292,13 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
     assert "Rubric: trivial =" in text
     decider_line = next(line for line in text.splitlines() if "decide_route.py" in line)
     assert "its route is a floor, raise it from context" in decider_line and "Approvals (yes) keep" in decider_line
-    assert "ask:true" in decider_line and "AskUserQuestion" in decider_line
+    assert "ask:true" in decider_line and "AskUserQuestion" in decider_line and "headless: higher" in decider_line
+    assert "follow its row" in decider_line
     # The model never quotes user text into a shell: the prompt goes through a file.
     assert "with Write" in decider_line and "--prompt-file" in decider_line and "stdin" not in decider_line
+    directive = "\n".join(text.splitlines()[text.splitlines().index(decider_line):])
+    # Owner-set budget for decider mode (default mode keeps 2400); Claude Code's own limit is 10000.
+    assert len(directive) < 5000, "the decider-mode hook output is over its budget"
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     text = context(project, "add a button")
     assert "decide_route.py" not in text
-    classify_line = next(line for line in text.splitlines() if line.startswith("Classify this prompt using"))
-    # Same budget as the classify line plus the ask rule; the hard caps are asserted above.
-    assert len(decider_line) <= len(classify_line) + 60, "the hook output is near its cap"

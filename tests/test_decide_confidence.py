@@ -39,6 +39,29 @@ def test_supercritical_alternative_is_clamped(project, write_config, monkeypatch
     assert "suggests supercritical" in result["reason"]
 
 
+def test_synthesized_alternative_does_not_suggest_supercritical(project, write_config, monkeypatch, fake_openrouter):
+    enable_decider(write_config, monkeypatch)
+    answer_with(fake_openrouter, route="critical", confidence=0.95)
+    result = json.loads(decide(project, "add a button")[1])
+    assert "suggests supercritical" not in result["reason"]
+
+
+def test_raw_supercritical_route_has_no_alternative(project, write_config, monkeypatch, fake_openrouter):
+    enable_decider(write_config, monkeypatch)
+    answer_with(fake_openrouter, route="supercritical", confidence=0.5, alternative="complex")
+    result = json.loads(decide(project, "add a button")[1])
+    assert (result["route"], result["alternative"], result["ask"]) == ("critical", None, False)
+    assert "suggests supercritical" in result["reason"]
+
+
+def test_raw_supercritical_alternative_is_clamped(project, write_config, monkeypatch, fake_openrouter):
+    enable_decider(write_config, monkeypatch)
+    answer_with(fake_openrouter, route="standard", confidence=0.6, alternative="supercritical")
+    result = json.loads(decide(project, "add a button")[1])
+    assert (result["alternative"], result["ask"]) == ("critical", True)
+    assert "suggests supercritical" in result["reason"]
+
+
 def test_floor_at_or_above_the_alternative_drops_it(project, write_config, monkeypatch, fake_openrouter):
     enable_decider(write_config, monkeypatch)
     answer_with(fake_openrouter, route="trivial", confidence=0.5, alternative="complex")

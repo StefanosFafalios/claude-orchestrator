@@ -135,7 +135,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     task_key = hashlib.sha256((prompt + "\0" + session_id).encode("utf-8")).hexdigest()[:16]
     # Same length budget either way: the hook output is close to its cap.
     lines = [
-        "Save the prompt with Write, run decide_route.py --prompt-file <f>: its route is a floor, raise it from context; exit 3: use the rubric. ask:true: AskUserQuestion route vs alternative, headless: higher. State `route=<tier>: <reason>`. Approvals (yes) keep it."
+        "Save the prompt with Write, run decide_route.py --prompt-file <f>: its route is a floor, raise it from context; exit 3: use the rubric. ask:true: AskUserQuestion route vs alternative, headless: higher. State `route=<tier>: <reason>`, follow its row. Approvals (yes) keep it."
         if decider_usable(config, state) else
         "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, then follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
         f"Rubric: {RUBRIC}",
@@ -160,9 +160,8 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
     lines.extend(rows)
-    lines.append("If the tier changes mid-task, switch rows, hand finished work over via a handoff; never downgrade critical.")
-    lines.append("Multi-task plans: route each task with route_engine.py --task-id <task>.")
-    lines.append("Visibility: one line before each step saying what starts and why. Run Codex via Bash run_in_background; await its completion notice without reading output early. Relay approach and key decisions in at most 3 bullets.")
+    lines.append("Tier change mid-task: switch rows, hand finished work over via a handoff; never downgrade critical. Multi-task plans: route each task with route_engine.py --task-id <task>.")
+    lines.append("Visibility: before each step, one line on what starts and why. Run Codex via Bash run_in_background; await its notice, don't read output early. Relay approach and key decisions in <=3 bullets.")
     return "\n".join(lines)
 
 
