@@ -662,6 +662,8 @@ def test_flagged_task_researches_before_plan_and_feeds_both_prompts(repo, write_
     assert research["agentType"] == "cost-aware-orchestrator:researcher" and QUERY in research["prompt"]
     calls = {c["label"]: c for c in out["calls"]}
     assert RESEARCH["report"] in calls["plan"]["prompt"] and RESEARCH["report"] in calls["implement:claude"]["prompt"]
+    saved = next((repo / ".claude" / "orchestrator" / "runs").glob("*/research.md")).read_text()
+    assert saved.startswith("Research report (") and RESEARCH["report"] in saved
 
 
 def test_research_runs_on_openrouter_with_the_generic_query_only(repo, openrouter, fake_openrouter):
@@ -733,3 +735,14 @@ def test_long_research_report_keeps_its_first_characters(repo, openrouter, fake_
     handoffs = list((repo / ".claude" / "orchestrator" / "handoffs").glob("*.md"))
     text = "".join(h.read_text() for h in handoffs)
     assert "FINDINGS-FIRST" in text and "LAST-WORDS" not in text
+
+
+def test_skipped_research_does_not_block_the_architect_query(repo, openrouter, fake_openrouter):
+    openrouter(routing={"research": {"complex": {"models": ["sonar"], "effort": "low"}}})
+    fake_openrouter.chat_body = fake_openrouter.answer("Library 2.0 renamed connect().")
+    out = run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, route="complex")},
+                     "agents": dict(SCOUT_AGENTS, plan=dict(PLAN, research_query=QUERY))})
+    assert any("research skipped" in line for line in out["logs"])
+    assert len(research_run_calls(out)) == 1 and "--model 'perplexity/sonar'" in research_run_calls(out)[0]["command"]
+    order = labels(out["calls"])
+    assert order.index("plan") < order.index("research:openrouter")

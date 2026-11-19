@@ -24,7 +24,7 @@ import openrouter_budget as ob
 from engine_state import EFFORTS, ConfigError, effective_status, engine_enabled, load_config, load_synced_state, redact
 
 TIMEOUT = 120
-DEEP_TIMEOUT = 600  # deep-research models search for minutes
+DEEP_TIMEOUT = 540  # deep-research models search for minutes; stay under the workflow's 600 s bash cap
 MAX_QUERY_CHARS = 2000
 INSTRUCTIONS = ("Answer the question with concise findings. Cite a source and its date for every claim. "
                 "Do not speculate: say plainly when sources do not settle the question.")

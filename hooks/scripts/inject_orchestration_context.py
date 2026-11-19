@@ -112,8 +112,8 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
     results = [impl, review, style, docs]
     if "research" in config["routing"]:
         research = route("research", tier, config, state, task_key=task_key, task_type=task_type)
-        if research["engine"] != "none":
-            results.append(research)
+        # Mirrors researchPass's skip rule; not added to `results`: the research hint line covers its engine.
+        if research["engine"] != "none" and not research["requires_human_review"]:
             shown = choice("researcher", research)
             steps.append(f"research={shown.partition('/')[2] if research['engine'] == 'claude' else shown}")
     if tier in ("complex", "critical", "supercritical"):
@@ -193,7 +193,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if "research" in config["routing"]:
         extra = (" Codex: CODEX_SEARCH=1, read-only." if any("research=Codex" in row for row in rows) else "") + (
             " OpenRouter: research_run.py --query-file <f> --model <m>." if any("research=OpenRouter" in row for row in rows) else "")
-        lines.append("Needs outside facts/docs (non-trivial): run research= first, generic query only (no code/paths/names)." + extra)
+        lines.append("Needs outside facts/docs (non-trivial): run the researcher agent per research= first, generic query only (no code/paths/names)." + extra)
     if has_type_rows(config):
         type_lines = []
         for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):

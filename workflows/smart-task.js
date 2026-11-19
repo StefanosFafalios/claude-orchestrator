@@ -436,7 +436,6 @@ async function scoutPass() {
 // Web research on the routed engine; appends the report to `context`. The query is a generic question: OpenRouter
 // never sees the task text, so without a query it is excluded. A failed or skipped step never blocks the task.
 async function researchPass(query) {
-  researched = true
   phase('Research')
   const prompt = `Task (${ROUTE}): ${TASK}\n${query ? `Research question: ${query}\n` : ''}\nFind the outside knowledge this task needs (current docs, API facts, recent changes) ` +
     `and return a short sourced report. Search only with generic queries: never include code, paths, project names or secrets.`
@@ -447,6 +446,7 @@ async function researchPass(query) {
       log(`research skipped: ${rr.engine === 'none' ? rr.reason : `${rr.engine} is constrained`}`)
       return
     }
+    researched = true  // only a step that reached an engine uses up the one research pass
     let code = 0, report = ''
     if (rr.engine === 'claude') {
       const r = await agent(prompt, {
@@ -455,7 +455,7 @@ async function researchPass(query) {
       code = r ? 0 : 1
       report = r ? r.report : ''
     } else if (rr.engine === 'codex') {
-      const w = await runWrapper('codex', rr, `${RUN}/research.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ')
+      const w = await runWrapper('codex', rr, `${RUN}/research-prompt.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ')
       code = w.code
       report = w.output.slice(0, 3000)
     } else {
@@ -470,8 +470,11 @@ async function researchPass(query) {
       report = w.stdout
     }
     if (code !== 42) {
-      if (code === 0 && report) context += `\n\nResearch report (${rr.model}):\n${report}`
-      else log(`research failed (${rr.engine} exit ${code}); continuing without it`)
+      if (code === 0 && report) {
+        const section = `Research report (${rr.model}):\n${report}`
+        context += `\n\n${section}`
+        await bash(script([`mkdir -p ${q(RUN)}`, heredoc(`${RUN}/research.md`, section)]), 'research:save', 'Research')
+      } else log(`research failed (${rr.engine} exit ${code}); continuing without it`)
       return
     }
     await markLimit(rr.engine, 'Research')

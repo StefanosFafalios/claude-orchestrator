@@ -118,7 +118,7 @@ When the decider flags `needs_research` on a nontrivial task (or the architect's
 `--role research` picks the cheapest healthy model that can search the web: Claude's `researcher`
 agent, Codex read-only with `CODEX_SEARCH=1`, or OpenRouter through `research_run.py` (the Perplexity
 `sonar` models). OpenRouter only ever receives a generic, redacted question, never the task text;
-without one it is skipped. Non-search models on OpenRouter research use OpenRouter's web plugin (small per-request search fee). Exit 42 marks the engine limited and re-routes; any other failure
+without one it is skipped. Only the Claude architect can request research from its plan; wrapper-based architects cannot. Non-search models on OpenRouter research use OpenRouter's web plugin (small per-request search fee). Exit 42 marks the engine limited and re-routes; any other failure
 continues without research. A config without `routing.research` never researches. The `Cost:` line
 a research report prints is not written to the cached spend snapshot, so the cap check can lag until
 the next `/key` refresh (several deep-research calls in a row can overshoot a cap).
