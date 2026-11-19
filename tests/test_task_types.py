@@ -80,8 +80,9 @@ def test_weak_review_type_row_still_needs_strong_reviewer(config):  # noqa: F811
     weakest, strongest = by_score[0], by_score[-1]
     with_types(config, "review", "standard", tests={"models": [weakest], "effort": "low"})
     result = route("review", "standard", config, state(), "t1", strongest, task_type="tests")
-    assert (result["engine"] == "none" or result.get("requires_human_review")
-            or model_map.score(config, result["canonical_model"]) >= model_map.score(config, strongest))
+    # Nothing in the type row is as strong as the writer: the weaker model reviews, flagged for a human.
+    assert result["engine"] != "none"
+    assert result["canonical_model"] == weakest and result["requires_human_review"] is True
 
 
 def test_stronger_review_type_row_is_picked(config):  # noqa: F811
