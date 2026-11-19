@@ -317,6 +317,7 @@ async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, en
   const res = await bash([
     `mkdir -p ${q(RUN)}`,
     ...(prompt === undefined ? [] : [heredoc(file, prompt)]),
+    ...(lastMessage ? [`rm -f ${q(lastMessage)}`] : []),  // a stale answer from an earlier attempt must never be read
     `${env}${WRAPPERS[engine](r, sandbox)} ${q(file)} > ${q(`${out}.out`)} 2> ${q(`${out}.err`)}; code=$?`,
     `echo ===OUTPUT===; tail -c 3000 ${q(`${out}.out`)}; echo; tail -c 1000 ${q(`${out}.err`)}`,
     `echo ===FILES===; { git diff --name-only HEAD 2>/dev/null || git diff --name-only; git ls-files --others --exclude-standard; } | sort -u`,
