@@ -91,3 +91,22 @@ def test_invalid_min_confidence_is_an_invalid_config(write_config, monkeypatch, 
     enable_decider(write_config, monkeypatch, decider={"min_confidence": value})
     with pytest.raises(ConfigError, match="min_confidence"):
         load_config()
+
+
+@pytest.mark.parametrize("fields, needs, query", [
+    ({"needs_research": True, "research_query": " What changed in X v2? "}, True, "What changed in X v2?"),
+    ({"needs_research": True, "research_query": "q" * 400}, True, "q" * 300),
+    ({"needs_research": True}, True, None),
+    ({"needs_research": True, "research_query": 5}, True, None),
+    ({"needs_research": False, "research_query": "q"}, False, None),
+    ({"needs_research": "yes", "research_query": "q"}, False, None),
+    ({}, False, None),
+])
+def test_needs_research(project, write_config, monkeypatch, fake_openrouter, fields, needs, query):
+    enable_decider(write_config, monkeypatch)
+    answer_with(fake_openrouter, confidence=0.95, alternative="complex", **fields)
+    code, out, err = decide(project, "add a button")
+    assert code == 0, err
+    result = json.loads(out)
+    assert result["needs_research"] is needs
+    assert result.get("research_query") == query

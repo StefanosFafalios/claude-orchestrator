@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from conftest import ROOT
 
@@ -358,3 +359,15 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
     (project / ".claude" / "engine-state.json").write_text(json.dumps({"openrouter": {"status": "limited"}}))
     text = context(project, "add a button")
     assert "decide_route.py" not in text
+
+
+def test_directive_research_only_when_configured(project):
+    text = context(project, "add a button")
+    assert text.count("needs_research") == 1
+    assert "research=" in next(line for line in text.splitlines() if line.startswith("standard:"))
+    assert "research=" not in next(line for line in text.splitlines() if line.startswith("trivial:"))
+    path = Path(os.environ["ORCHESTRATOR_DEFAULT_CONFIG"])
+    config = json.loads(path.read_text())
+    del config["routing"]["research"]
+    path.write_text(json.dumps(config))
+    assert "research" not in context(project, "add a button").lower()

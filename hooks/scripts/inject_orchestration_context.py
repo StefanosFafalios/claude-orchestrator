@@ -110,6 +110,11 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
 
     steps = []
     results = [impl, review, style, docs]
+    if "research" in config["routing"]:
+        research = route("research", tier, config, state, task_key=task_key, task_type=task_type)
+        if research["engine"] != "none":
+            results.append(research)
+            steps.append(f"research={choice('researcher', research)}")
     if tier in ("complex", "critical", "supercritical"):
         scout = route("scout", tier, config, state, task_type=task_type)
         arch = route("architecture", tier, config, state, task_key=task_key, permission_mode=permission_mode,
@@ -184,6 +189,8 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     elif any(row.startswith("supercritical:") for row in rows):
         lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>, then route with --task-id {task_key}.")
     lines.extend(rows)
+    if "research" in config["routing"]:
+        lines.append("Outside knowledge needed: set needs_research, run research= first (generic query).")
     if has_type_rows(config):
         type_lines = []
         for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):
