@@ -47,7 +47,7 @@ const TASK_ID = SAFE_ID.test(String(ARGS.task_id || '')) ? ARGS.task_id : `${slu
 const RUN = `.claude/orchestrator/runs/${TASK_ID}`
 const PARENT = String(ARGS.parent_task_id || '')
 if (PARENT && !/^[A-Za-z0-9._-]{1,64}$/.test(PARENT)) throw new Error(`invalid args.parent_task_id: ${JSON.stringify(PARENT)}`)
-// The workflow never asks questions, so every route is headless; auto mode lets the router pick supercritical effort.
+// The workflow never asks questions, so every route is headless; for opt-in `ask` rows, auto mode lets the router inherit a parent's effort.
 const ROUTE_FLAGS = ` --task-id ${q(TASK_ID)} --headless --permission-mode ${q(ARGS.permission_mode || 'default')}` +
   (PARENT ? ` --parent-task-id ${q(PARENT)}` : '')
 

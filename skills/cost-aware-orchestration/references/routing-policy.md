@@ -58,7 +58,8 @@ an effort the user names with `engine_state.py set-effort` overrides it for that
 its descendants. Configurations with an opt-in `ask` row retain the ask flow.
 
 Effort precedence: a user-named supercritical effort, then the `ask` flow, then the row's
-optional `model_effort` entry for the picked model, then the row's `effort`.
+optional `model_effort` entry for the picked model, then the row's `effort`. A user-named
+effort applies to whichever model the row picks, including a fallback from the top model.
 
 ## Implementation
 

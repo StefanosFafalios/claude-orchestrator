@@ -104,7 +104,7 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
         reason = f"{reason}; suggests supercritical"
     floor = classify(prompt)  # the raw prompt: redaction would hide credential keywords
     if floor["route"] in FLOOR_ROUTES and ROUTES.index(decided) < ROUTES.index(floor["route"]):
-        decided, reason = floor["route"], f"keyword floor over decider's {decided}: {floor['reason']}"
+        decided, reason = floor["route"], f"{reason}; keyword floor over decider's {decided}: {floor['reason']}"
     if alternative is not None and (alternative == decided or (
             floor["route"] in FLOOR_ROUTES and ROUTES.index(alternative) < ROUTES.index(floor["route"]))):
         alternative = None

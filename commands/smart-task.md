@@ -40,11 +40,11 @@ Steps:
    })
    ```
 
-   `permission_mode` is the mode shown on the hook context's supercritical line
-   (`--permission-mode <mode>`); omit it when unknown (the workflow treats missing as
-   `default`, auto mode off). Pass `parent_task_id` only when this task is a sub-task of a
-   supercritical parent: it lets the workflow inherit the parent's effort answer in auto
-   mode. Without them a supercritical run always stops for a human.
+   Supercritical runs use the row's effort (`medium` by default) or an effort the user named
+   with `engine_state.py set-effort`, which also applies to sub-tasks that pass
+   `parent_task_id`. `permission_mode` matters only for a config that opts into an `ask` row
+   (pass the mode from the hook's supercritical line; missing counts as `default`): there a
+   run without a recorded effort stops for a human unless auto mode inherits the parent's.
 
    If the Workflow tool is not available in this session, run the same steps inline
    instead, following the `cost-aware-orchestration` skill: route with
