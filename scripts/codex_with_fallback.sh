@@ -20,10 +20,11 @@ out_file=$(mktemp)
 err_file=$(mktemp)
 trap 'rm -f "$out_file" "$err_file"' EXIT
 
-args=(exec --sandbox "${CODEX_SANDBOX:-read-only}")
+args=()
+[[ "${CODEX_SEARCH:-}" == 1 ]] && args+=(--search)  # top-level option: must precede exec
+args+=(exec --sandbox "${CODEX_SANDBOX:-read-only}")
 [[ -n "${CODEX_MODEL:-}" ]] && args+=(--model "$CODEX_MODEL")
 [[ -n "${CODEX_EFFORT:-}" ]] && args+=(-c "model_reasoning_effort=\"$CODEX_EFFORT\"")
-[[ "${CODEX_SEARCH:-}" == 1 ]] && args+=(--search)
 args+=("$(cat "$1")")
 
 "${CODEX_BIN:-codex}" "${args[@]}" </dev/null >"$out_file" 2>"$err_file"

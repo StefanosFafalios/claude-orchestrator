@@ -363,8 +363,9 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
 
 def test_directive_research_only_when_configured(project):
     text = context(project, "add a button")
-    assert text.count("needs_research") == 1
-    assert "research=" in next(line for line in text.splitlines() if line.startswith("standard:"))
+    assert text.count("run research= first") == 1
+    assert "research=haiku/low" in next(line for line in text.splitlines() if line.startswith("standard:"))
+    assert "researcher" not in text and "CODEX_SEARCH" not in text
     assert "research=" not in next(line for line in text.splitlines() if line.startswith("trivial:"))
     path = Path(os.environ["ORCHESTRATOR_DEFAULT_CONFIG"])
     config = json.loads(path.read_text())

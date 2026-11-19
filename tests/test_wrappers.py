@@ -94,4 +94,7 @@ def test_claude_permission_mode(tmp_path, monkeypatch):
 def test_codex_search_flag(tmp_path, monkeypatch, value, expected):
     monkeypatch.setenv("CODEX_SEARCH", value)
     run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stdout="ok")
-    assert ("--search" in (tmp_path / "args").read_text().split()) is expected
+    words = (tmp_path / "args").read_text().split()
+    assert ("--search" in words) is expected
+    if expected:
+        assert words.index("--search") < words.index("exec")
