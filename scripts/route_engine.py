@@ -158,6 +158,8 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
     one); ``"auto"`` derives the implementer from ``task_key``."""
     if (role, task_route) in model_map.UNUSED:
         return _none(f"trivial tasks get no {role.replace('_', ' ')}", human=False)
+    if role == "research" and role not in config["routing"]:
+        return _none("the config has no routing.research row", human=False)
     engines = Engines(config, state)
     entry = dict(model_map.row(config, role, task_route, task_type))
     human = False

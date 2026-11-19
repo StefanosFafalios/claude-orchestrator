@@ -59,6 +59,24 @@
       "engines": {
         "codex": "gpt-6-astra"
       }
+    },
+    "sonar": {
+      "score": 45,
+      "engines": {
+        "openrouter": "perplexity/sonar"
+      }
+    },
+    "sonar-reasoning-pro": {
+      "score": 60,
+      "engines": {
+        "openrouter": "perplexity/sonar-reasoning-pro"
+      }
+    },
+    "sonar-deep-research": {
+      "score": 70,
+      "engines": {
+        "openrouter": "perplexity/sonar-deep-research"
+      }
     }
   },
   "routing": {
@@ -246,6 +264,40 @@
           "haiku"
         ],
         "effort": "low"
+      }
+    },
+    "research": {
+      "standard": {
+        "models": [
+          "haiku",
+          "gpt-6.1-terra",
+          "sonar"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "sonnet",
+          "gpt-6.1-sol",
+          "sonar-reasoning-pro"
+        ],
+        "effort": "medium"
+      },
+      "critical": {
+        "models": [
+          "opus",
+          "gpt-6-astra",
+          "sonar-deep-research"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "opus",
+          "gpt-6-astra",
+          "sonar-deep-research"
+        ],
+        "effort": "high"
       }
     }
   }

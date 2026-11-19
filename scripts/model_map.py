@@ -8,14 +8,15 @@ from __future__ import annotations
 
 from engine_state import EFFORTS, ConfigError
 
-ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs", "decider")
+ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs", "decider", "research")
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
 LEGACY_KEYS = ("defaults", "codex.tiers", "codex.default_model")
 ASK_ALLOWED = {("review", "supercritical"), ("architecture", "supercritical")}
 TASK_TYPES = ("frontend", "debug", "refactor", "tests", "docs")
 # Trivial work is handled directly: nothing routes a scout, a model review or a docs pass for it.
 # Copies of older templates still carry these rows, so they are ignored, not rejected.
-UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial"), ("docs", "trivial")}
+UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial"), ("docs", "trivial"),
+          ("research", "trivial")}
 
 
 def legacy_keys(project_config: dict) -> list[str]:
@@ -61,8 +62,8 @@ def validate(config: dict) -> None:
         if isinstance(minimum, bool) or not isinstance(minimum, (int, float)) or not 0 < minimum <= 1:
             raise ConfigError("decider.min_confidence must be a number with 0 < x <= 1")
     for role in ROLES:
-        if role in ("docs", "decider") and role not in routing:
-            continue  # configs from before these roles: docs uses style_review, the decider is off
+        if role in ("docs", "decider", "research") and role not in routing:
+            continue  # configs from before these roles: docs uses style_review, the decider and research are off
         rows = routing.get(role)
         if not isinstance(rows, dict):
             raise ConfigError(f"routing.{role} is missing")

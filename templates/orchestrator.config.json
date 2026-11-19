@@ -128,6 +128,24 @@
         "codex": "gpt-6-luna",
         "openrouter": "openai/gpt-6-luna"
       }
+    },
+    "sonar": {
+      "score": 45,
+      "engines": {
+        "openrouter": "perplexity/sonar"
+      }
+    },
+    "sonar-reasoning-pro": {
+      "score": 60,
+      "engines": {
+        "openrouter": "perplexity/sonar-reasoning-pro"
+      }
+    },
+    "sonar-deep-research": {
+      "score": 70,
+      "engines": {
+        "openrouter": "perplexity/sonar-deep-research"
+      }
     }
   },
   "routing": {
@@ -342,6 +360,40 @@
           "gpt-6-luna"
         ],
         "effort": "low"
+      }
+    },
+    "research": {
+      "standard": {
+        "models": [
+          "haiku",
+          "gpt-6.1-terra",
+          "sonar"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "sonnet",
+          "gpt-6.2-sol",
+          "sonar-reasoning-pro"
+        ],
+        "effort": "medium"
+      },
+      "critical": {
+        "models": [
+          "opus",
+          "gpt-6.2-astra",
+          "sonar-deep-research"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "opus",
+          "gpt-6.2-astra",
+          "sonar-deep-research"
+        ],
+        "effort": "high"
       }
     },
     "decider": {
