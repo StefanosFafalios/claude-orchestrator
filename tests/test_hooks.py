@@ -372,3 +372,22 @@ def test_directive_research_only_when_configured(project):
     del config["routing"]["research"]
     path.write_text(json.dumps(config))
     assert "research" not in context(project, "add a button").lower()
+
+
+def test_directive_research_hints_follow_the_engine(project, write_config, monkeypatch):
+    state = project / ".claude" / "engine-state.json"
+    default = context(project, "add a button")
+    assert "CODEX_SEARCH" not in default and "research_run.py" not in default
+    state.write_text(json.dumps({"claude": {"status": "limited", "remaining_pct": 0}}))
+    codex = context(project, "add a button")
+    assert "research=Codex/" in codex
+    assert codex.count("CODEX_SEARCH=1") == 1 and "research_run.py" not in codex
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    write_config({"engines": {"openrouter": True},
+                  "models": {"or-cheap": {"score": 56, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"implementation": {"standard": {"models": ["or-cheap"], "effort": "low"}}}})
+    state.write_text(json.dumps({"claude": {"status": "limited", "remaining_pct": 0},
+                                 "codex": {"status": "limited", "remaining_pct": 0}}))
+    router = context(project, "add a button")
+    assert "research=OpenRouter/" in router
+    assert router.count("research_run.py --query-file") == 1 and "CODEX_SEARCH" not in router
