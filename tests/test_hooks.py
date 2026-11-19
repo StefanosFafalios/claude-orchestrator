@@ -183,6 +183,31 @@ def test_directive_no_engine_and_constrained_quota(project, write_config):
     assert "quota constrained: one atomic task, then human review" in text
 
 
+def test_type_rows_without_engine_are_one_line_per_tier(project, write_config):
+    write_config({"engines": {"codex": False}, "routing": {"implementation": {"complex": {"types": {"debug": {
+        "models": ["gpt-6.1-terra"], "effort": "high"}}}}}})
+    lines = context(project, "add a button").splitlines()
+    typed = [line for line in lines if "/debug:" in line or "/frontend:" in line]
+    assert len(typed) == 1 and typed[0].startswith("complex/debug: No engine available (")
+    assert typed[0].endswith("); do not start; ask user.")
+
+
+def test_type_rows_compare_by_step_key(project, write_config):
+    write_config({"routing": {"implementation": {"standard": {"types": {"tests": {
+        "models": ["haiku"], "effort": "low"}}}}}})
+    (project / ".claude" / "engine-state.json").write_text(json.dumps({
+        "claude": {"status": "near_limit", "remaining_pct": 10},
+        "codex": {"status": "near_limit", "remaining_pct": 10},
+    }))
+    lines = context(project, "add a button").splitlines()
+    base = next(line for line in lines if line.startswith("standard:"))
+    typed = next(line for line in lines if line.startswith("standard/tests:"))
+    # The base row is quota constrained and the type row is not: no misaligned docs= or quota entry.
+    assert "quota constrained" in base
+    assert typed == "standard/tests: implement=implementer/haiku/low; review=verifier/sonnet/medium."
+    assert not any(line.startswith(("complex/", "critical/", "standard/docs")) for line in lines)
+
+
 def test_hook_is_fast(project):
     import time
     start = time.monotonic()

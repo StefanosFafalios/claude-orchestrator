@@ -27,7 +27,7 @@ from engine_state import (  # noqa: E402
     load_config,
     load_synced_state,
 )
-from model_map import TASK_TYPES, has_type_rows  # noqa: E402
+from model_map import TASK_TYPES, UNUSED, has_type_rows  # noqa: E402
 from route_engine import route  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
@@ -84,12 +84,12 @@ LABELS = {"codex": "Codex", "openrouter": "OpenRouter"}
 
 
 def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mode: str = "", task_type=None):
-    """Build a compact row from the routing decisions: ``(row, engines used, implementation engine)``."""
+    """Build a compact row from the routing decisions: ``(row, engines used, implementation engine, steps)``."""
     if tier == "trivial":
-        return "trivial: handle directly, lowest effort, no review.", set(), None
+        return "trivial: handle directly, lowest effort, no review.", set(), None, []
     impl = route("implementation", tier, config, state, task_key=task_key, task_type=task_type)
     if impl["engine"] == "none":
-        return f"{tier}: No engine available ({impl['reason']}); do not start; ask user.", set(), None
+        return f"{tier}: No engine available ({impl['reason']}); do not start; ask user.", set(), None, []
     review = route("review", tier, config, state, task_key=task_key, implementation_model=impl["model"],
                    permission_mode=permission_mode, task_type=task_type)
     style = route("style_review", tier, config, state, task_type=task_type)
@@ -126,7 +126,27 @@ def steps_for(tier: str, config: dict, state: dict, task_key: str, permission_mo
     steps.append(f"docs={choice('doc-updater', docs)}")
     if impl["requires_human_review"]:
         steps.insert(-1, "quota constrained: one atomic task, then human review")
-    return f"{tier}: " + "; ".join(steps) + ".", {r["engine"] for r in results}, impl["engine"]
+    return f"{tier}: " + "; ".join(steps) + ".", {r["engine"] for r in results}, impl["engine"], steps
+
+
+def type_kinds(config: dict, tier: str) -> list:
+    """Task types that have a row among the roles ``tier`` uses, mirroring ``model_map.row``'s remaps."""
+    if tier == "trivial":
+        return []
+    roles = ["implementation", "review", "style_review", "docs"]
+    if tier in ("complex", "critical", "supercritical"):
+        roles += ["scout", "architecture"]
+    found = set()
+    for role in roles:
+        route_name = "critical" if (role, tier) == ("implementation", "supercritical") else tier
+        if (role, route_name) in UNUSED:
+            continue
+        if role == "docs" and role not in config["routing"]:
+            role = "style_review"
+        entry = config["routing"].get(role, {}).get(route_name)
+        if isinstance(entry, dict):
+            found.update(entry.get("types", {}))
+    return [kind for kind in TASK_TYPES if kind in found]
 
 
 def directive(prompt: str, config: dict, state: dict, session_id: str = "", permission_mode: str = "") -> str:
@@ -147,9 +167,9 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     tiers = ("trivial", "standard", "complex", "critical", "supercritical")
     floor = tiers.index(cls["route"]) if cls["route"] in FLOOR_ROUTES else 0
     built = [steps_for(tier, config, state, task_key, permission_mode) for tier in tiers[floor:]]
-    rows = [row for row, _, _ in built]
-    used = set().union(*(engines for _, engines, _ in built))
-    delegated = {impl for _, _, impl in built}
+    rows = [row for row, *_ in built]
+    used = set().union(*(b[1] for b in built))
+    delegated = {b[2] for b in built}
     lines.append(f"Agents are {PLUGIN}:<name>.")
     lines.append(f"Test: {config['commands'].get('test') or 'none configured'}.")
     if "codex" in used:
@@ -166,12 +186,15 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     lines.extend(rows)
     if has_type_rows(config):
         lines.append("Types (only if clearly one): frontend, debug, refactor, tests, docs: state route=<tier>/<type>, use its <tier>/<type> line.")
-        for tier, base in zip(tiers[floor:], rows):
-            base_steps = base[len(f"{tier}: "):].rstrip(".").split("; ")
-            for kind in TASK_TYPES:
-                typed = steps_for(tier, config, state, task_key, permission_mode, kind)[0]
-                typed_steps = typed[len(f"{tier}: "):].rstrip(".").split("; ")
-                changed = [step for step, original in zip(typed_steps, base_steps) if step != original]
+        for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):
+            base = {step.partition("=")[0]: step for step in base_steps}
+            for kind in type_kinds(config, tier):
+                typed, _, impl, steps = steps_for(tier, config, state, task_key, permission_mode, kind)
+                if impl is None and tier != "trivial":
+                    if base_impl is not None:
+                        lines.append(f"{tier}/{kind}: {typed[len(tier) + 2:]}")
+                    continue
+                changed = [step for step in steps if base.get(step.partition("=")[0]) != step]
                 if changed:
                     lines.append(f"{tier}/{kind}: {'; '.join(changed)}.")
     lines.append("Tier change mid-task: switch rows, hand finished work over via a handoff; never downgrade critical. Multi-task plans: route each task with route_engine.py --task-id <task>.")
