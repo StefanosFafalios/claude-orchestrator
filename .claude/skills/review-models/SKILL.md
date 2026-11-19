@@ -41,6 +41,10 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   price; on a tie, the higher score goes first. Review rows can stay cheapest-first because
   the router keeps quality: it takes the first reviewer that scores at least the
   implementer's model and is not that model.
+- Set a row's `model_effort` only from benchmark results measured at different effort
+  levels: a model's override is the cheapest effort whose score still meets the row's bar,
+  so a stronger model may get a lower effort and a weaker fallback a higher one. No
+  evidence, no override; never put `fable` above `medium` (owner rule).
 - Coverage: for every model an implementation row can pick on a Claude-only or a
   Codex-only setup, the review row for that route must hold a different model on the same
   engine scoring at least as high (the shipped-template test in `tests/test_route_engine.py`

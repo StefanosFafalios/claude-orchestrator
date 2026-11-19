@@ -199,7 +199,8 @@ tiers and their default shape:
 
 Each routing row lists models in preference order (always a list, even for one model);
 each engine uses the first one it can serve (for Codex, from its local model cache; for
-OpenRouter, from the cached `/models` list).
+OpenRouter, from the cached `/models` list). A row may add `"model_effort": {"<model>": "<effort>"}`
+to give a listed model its own effort instead of the row's.
 
 **Adaptive split.** When several engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit

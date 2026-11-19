@@ -105,10 +105,11 @@ def _select(engines: Engines, model_ids: list[str], task_key: str | None = None,
                 config.get("fallback", {}).get("require_human_review_when_both_limited", True))}
 
 
-def _result(config: dict, picked: dict | None, effort: str) -> dict:
+def _result(config: dict, picked: dict | None, effort: str, per_model: dict | None = None) -> dict:
     if not picked:
         return _none("no engine available (limited, disabled, excluded or fallback not allowed)")
     model_id = picked["model_id"]
+    effort = (per_model or {}).get(model_id, effort)
     return {"engine": picked["engine"], "model": model_map.engine_name(config, model_id, picked["engine"]),
             "effort": effort, "canonical_model": model_id, "reason": picked["reason"],
             "requires_human_review": picked.get("requires_human_review", False),
@@ -151,14 +152,18 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
     engines = Engines(config, state)
     entry = dict(model_map.row(config, role, task_route))
     human = False
+    per_model = entry.get("model_effort", {})
     if entry["effort"] == "ask":
         entry["effort"], human = supercritical_effort(state, task_key, parent_task_id, permission_mode, headless)
+        per_model = {}
     elif (role, task_route) in model_map.ASK_ALLOWED:  # user-named effort: top-model rows only
         efforts = state.get("supercritical_efforts", {})
+        if task_key in efforts or parent_task_id in efforts:
+            per_model = {}
         entry["effort"] = efforts.get(task_key, efforts.get(parent_task_id, entry["effort"]))
     models = list(entry["models"])
     if role == "implementation":
-        return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"])
+        return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"], per_model)
     if role == "review":
         writers = [implementation_model] if isinstance(implementation_model, str) else list(implementation_model or [])
         writers = [route("implementation", task_route, config, state, task_key)["canonical_model"] if w == "auto" else w
@@ -167,15 +172,15 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
         others = [m for m in models if m not in impl_ids]
         bar = max((model_map.score(config, m) for m in impl_ids), default=None)
         stronger = [m for m in others if model_map.score(config, m) >= bar] if bar is not None else others
-        result = _result(config, _select(engines, stronger, exclude=tuple(exclude)), entry["effort"])
+        result = _result(config, _select(engines, stronger, exclude=tuple(exclude)), entry["effort"], per_model)
         if result["engine"] == "none" and stronger != others:
             # Nothing at least as capable is available: a weaker, different model beats no review.
-            result = _result(config, _select(engines, others, exclude=tuple(exclude)), entry["effort"])
+            result = _result(config, _select(engines, others, exclude=tuple(exclude)), entry["effort"], per_model)
             if result["engine"] != "none":
                 result["requires_human_review"] = True
                 result["reason"] += "; no reviewer at least as capable as the implementer"
         return _need_human(result, human)
-    result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"])
+    result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"], per_model)
     if role == "style_review":
         # Skipping style review never needs a human: the main review covers it.
         if not config.get("review", {}).get("split", True):

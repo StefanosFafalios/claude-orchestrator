@@ -6,7 +6,7 @@ its own name for that model, so routing lists canonical ids and stays engine-neu
 
 from __future__ import annotations
 
-from engine_state import ConfigError
+from engine_state import EFFORTS, ConfigError
 
 ROLES = ("implementation", "review", "scout", "style_review", "architecture", "docs", "decider")
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
@@ -64,6 +64,14 @@ def validate(config: dict) -> None:
                     raise ConfigError(f"{where} names unknown model '{name}'")
             if entry["effort"] == "ask" and (role, route_name) not in ASK_ALLOWED:
                 raise ConfigError(f"{where} cannot use effort 'ask'; only review/architecture supercritical can")
+            per_model = entry.get("model_effort", {})
+            if not isinstance(per_model, dict):
+                raise ConfigError(f"{where} 'model_effort' must be an object")
+            for name, effort in per_model.items():
+                if name not in names:
+                    raise ConfigError(f"{where} 'model_effort' names '{name}', which is not in its models")
+                if effort not in EFFORTS:
+                    raise ConfigError(f"{where} 'model_effort' for '{name}' must be one of {', '.join(EFFORTS)}")
 
 
 def row(config: dict, role: str, route: str) -> dict:
