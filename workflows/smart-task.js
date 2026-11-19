@@ -457,15 +457,17 @@ async function researchPass(query) {
     } else if (rr.engine === 'codex') {
       const w = await runWrapper('codex', rr, `${RUN}/research.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ')
       code = w.code
-      report = w.output.slice(-3000)
+      report = w.output.slice(0, 3000)
     } else {
       const file = `${RUN}/research-query.txt`
+      const out = `${RUN}/research.out`
       const w = await bash(
-        `mkdir -p ${q(RUN)}\n${heredoc(file, query)}\n${PY('research_run.py')} --query-file ${q(file)} --model ${q(rr.model)}${rr.effort ? ` --effort ${q(rr.effort)}` : ''}`,
+        `mkdir -p ${q(RUN)}\n${heredoc(file, query)}\n${PY('research_run.py')} --query-file ${q(file)} --model ${q(rr.model)}${rr.effort ? ` --effort ${q(rr.effort)}` : ''} > ${q(out)}\n` +
+          `code=$?; head -c 3000 ${q(out)}; exit $code`,
         'research:openrouter', 'Research', 600000,
       )
       code = w.exit_code
-      report = w.stdout.slice(-3000)
+      report = w.stdout
     }
     if (code !== 42) {
       if (code === 0 && report) context += `\n\nResearch report (${rr.model}):\n${report}`

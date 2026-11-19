@@ -723,3 +723,13 @@ def test_architect_research_query_runs_one_research_after_plan(repo, write_confi
     assert order.count("research") == 1 and order.index("plan") < order.index("research")
     calls = {c["label"]: c for c in out["calls"]}
     assert RESEARCH["report"] not in calls["plan"]["prompt"] and RESEARCH["report"] in calls["implement:claude"]["prompt"]
+
+
+def test_long_research_report_keeps_its_first_characters(repo, openrouter, fake_openrouter):
+    openrouter(routing={"research": {"standard": {"models": ["sonar", "haiku"], "effort": "low"}}})
+    set_state(repo, claude="limited", codex="limited")
+    fake_openrouter.chat_body = fake_openrouter.answer("FINDINGS-FIRST " + "x" * 4000 + " LAST-WORDS")
+    run(repo, {"task": "update the parser", "args": {"classification": dict(FLAGGED, research_query=QUERY)}, "agents": {}})
+    handoffs = list((repo / ".claude" / "orchestrator" / "handoffs").glob("*.md"))
+    text = "".join(h.read_text() for h in handoffs)
+    assert "FINDINGS-FIRST" in text and "LAST-WORDS" not in text

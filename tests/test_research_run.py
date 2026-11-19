@@ -69,6 +69,15 @@ def test_reasoning_only_for_reasoning_models_and_timeout_per_model(enabled, fake
     assert research_run.DEEP_TIMEOUT > research_run.TIMEOUT
 
 
+def test_web_plugin_only_for_non_perplexity_models(enabled, fake_openrouter, tmp_path, capsys):
+    path = tmp_path / "q.txt"
+    path.write_text("q")
+    for model in ("perplexity/sonar", "openai/gpt-6.1-terra"):
+        assert research_run.main(["--query-file", str(path), "--model", model]) == 0
+    sent = [json.loads(r["body"]) for r in fake_openrouter.chat_requests]
+    assert ["plugins" in b for b in sent] == [False, True] and sent[1]["plugins"] == [{"id": "web"}]
+
+
 def test_no_citations_means_no_sources_or_cost(enabled, fake_openrouter, tmp_path, capsys):
     fake_openrouter.chat_body = fake_openrouter.answer("plain answer")
     assert run(tmp_path, capsys)[:2] == (0, "plain answer\n")

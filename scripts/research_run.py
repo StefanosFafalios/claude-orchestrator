@@ -55,6 +55,8 @@ def research(query: str, model: str, effort: str | None, config: dict, state: di
                          {"role": "user", "content": redact(query)[:MAX_QUERY_CHARS]}]}  # redact first: a cut token would slip past
     if effort and ("reasoning" in model or "deep-research" in model):  # plain search models take no such field
         body["reasoning"] = {"effort": effort}
+    if not model.startswith("perplexity/"):  # only Perplexity models search on their own
+        body["plugins"] = [{"id": "web"}]
     request = urllib.request.Request(ob.api_base() + "/chat/completions", data=json.dumps(body).encode("utf-8"),
                                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
