@@ -98,6 +98,11 @@ caps it.
 - Prices and slugs: `GET https://openrouter.ai/api/v1/models` through `catalog.py`
   (278 models kept)
 
-**Smoke tests: pending owner key** for all 11 OpenRouter slugs above. Spend so far: $0.
+**Smoke tests (2026-11-19, owner-approved, on demand):** all 11 OpenRouter slugs passed. Each ran
+one read-only task through `openrouter_run.py` (Codex, effort low): list `scripts/` with a shell
+tool call and report the `.py` count. Every run exited 0 in 5-15 s and used 11k-56k tokens; none
+dropped. Counts were not graded (fable and opus answered 13, sonnet 10, the rest 12 of 12): the
+test checks tool calling, not care at low effort. Spend: the key's `/key` counter still read $0
+right after the runs (it lags); about 314k tokens in total.
 Codex names `gpt-6.1-terra`, `gpt-6.2-sol` and `gpt-6.2-astra` are not yet in this
 machine's Codex model cache; `engine_name` skips them until they appear.
