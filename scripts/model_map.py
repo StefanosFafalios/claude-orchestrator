@@ -34,6 +34,10 @@ def validate(config: dict) -> None:
     routing = config.get("routing")
     if not isinstance(models, dict) or not isinstance(routing, dict):
         raise ConfigError("config needs 'models' and 'routing' objects")
+    if "decider" in config:
+        minimum = config["decider"].get("min_confidence", 0.9) if isinstance(config["decider"], dict) else None
+        if isinstance(minimum, bool) or not isinstance(minimum, (int, float)) or not 0 < minimum <= 1:
+            raise ConfigError("decider.min_confidence must be a number with 0 < x <= 1")
     for role in ROLES:
         if role in ("docs", "decider") and role not in routing:
             continue  # configs from before these roles: docs uses style_review, the decider is off

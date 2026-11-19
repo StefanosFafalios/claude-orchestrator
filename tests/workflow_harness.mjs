@@ -1,7 +1,7 @@
 // Run workflows/smart-task.js outside Claude Code with a mocked agent().
 // bash() helper requests execute for real in the project; Claude subagents return
 // scripted results. Usage: node workflow_harness.mjs <project-dir> <scenario-json>
-// Prints {result, calls} as JSON.
+// Prints {result, calls, logs} as JSON.
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -11,6 +11,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const [project, scenarioJson] = process.argv.slice(2)
 const scenario = JSON.parse(scenarioJson)
 const calls = []
+const logs = []
 
 async function agent(prompt, opts = {}) {
   const command = /<command>\n([\s\S]*)\n<\/command>/.exec(prompt)
@@ -30,6 +31,6 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 const run = new AsyncFunction('args', 'agent', 'phase', 'log', src)
 const result = await run(
   { task: scenario.task, timestamp: '20261029T000000Z', plugin_root: root, ...(scenario.args || {}) },
-  agent, () => {}, () => {},
+  agent, () => {}, line => logs.push(String(line)),
 )
-console.log(JSON.stringify({ result, calls }))
+console.log(JSON.stringify({ result, calls, logs }))

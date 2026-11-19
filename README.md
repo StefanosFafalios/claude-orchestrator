@@ -39,7 +39,8 @@ to a file with the Write tool and run `decide_route.py --prompt-file <file>`: on
 call (the `routing.decider` row) picks a tier, never below the keyword floor and never above
 `critical` (a `supercritical` answer is only a suggestion). That tier is itself a floor: the model raises it from conversation
 context, and approvals keep the approved tier. Any failure (exit 3) hands classification back
-to the session model.
+to the session model. When the decider's confidence is below `decider.min_confidence`
+(default 0.9), the session asks you to choose between its tier and the alternative.
 
 ```mermaid
 flowchart TD

@@ -17,7 +17,9 @@ Steps:
    "reason": "<why>"}`. If the hook context told you to run `decide_route.py --prompt-file`,
    use that run (do not run it again): its route is a floor you raise from the conversation
    when warranted, never lower. Otherwise, or on its exit 3, classify by the hook rubric with
-   the whole conversation, never below the keyword floor. (Callers that pass no
+   the whole conversation, never below the keyword floor. If the decider run says `ask: true`,
+   ask the user first (AskUserQuestion: its `route` recommended, then `alternative`, with
+   reason and confidence) and pass the chosen route; when you cannot ask, take the higher. (Callers that pass no
    `classification` get the workflow's own decider, then the keyword classifier.)
 3. Check engine state: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status`.
    If it exits 2 (invalid config), report the error and stop.

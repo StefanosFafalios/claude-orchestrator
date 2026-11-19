@@ -44,6 +44,9 @@
   "codex": {
     "max_files_per_fallback": 5
   },
+  "decider": {
+    "min_confidence": 0.9
+  },
   "balance": {
     "mode": "adaptive",
     "routes": [

@@ -557,6 +557,16 @@ def test_unavailable_architecture_skips_plan(repo, write_config):
     assert out["result"]["implementation_engine"] == "claude"
 
 
+def test_workflow_takes_the_higher_tier_when_the_decider_is_unsure(repo, write_config, monkeypatch, fake_openrouter):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch, balance={"mode": "off"})
+    fake_openrouter.chat_body = fake_openrouter.answer(
+        '{"route": "standard", "confidence": 0.5, "alternative": "complex", "reason": "unclear"}')
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "complex"
+    assert "decider unsure (0.5): took complex" in out["logs"]
+
+
 def test_long_task_id_is_replaced(repo):
     out = run(repo, {"task": "fix typo in README", "args": {"task_id": "a" * 65},
                      "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
@@ -566,7 +576,7 @@ def test_long_task_id_is_replaced(repo):
 def test_workflow_uses_decider_route_and_falls_back_to_keywords(repo, write_config, monkeypatch, fake_openrouter):
     from test_decide_route import enable_decider
     enable_decider(write_config, monkeypatch, balance={"mode": "off"})
-    fake_openrouter.chat_body = fake_openrouter.answer('{"route": "trivial", "reason": "tiny"}')
+    fake_openrouter.chat_body = fake_openrouter.answer('{"route": "trivial", "confidence": 0.95, "reason": "tiny"}')
     out = run(repo, {"task": "add unit tests for parser", "agents": {"implement:claude": DONE}})
     assert out["result"]["route"] == "trivial", "the decider's route wins over the keyword standard"
     assert "decide_route.py" in next(c for c in out["calls"] if c["label"] == "classify")["command"]

@@ -39,7 +39,8 @@ other scripts and hooks import from it rather than re-implementing them.
 `scripts/openrouter_run.py` runs OpenRouter models through Codex and supervises spend.
 `scripts/decide_route.py` is the cheap tier decider: one direct OpenRouter call on the
 `routing.decider` row, clamped to the keyword floor; exit 3 (never 42) hands classification
-back to the session model and marks nothing.
+back to the session model and marks nothing. It also reports `confidence`, `alternative` and
+`ask` (confidence below `decider.min_confidence`, default 0.9): the session then asks the user.
 `scripts/usage_sources.py` reads observed quota from local files only (Claude status line
 input, Codex session logs); `engine_state.sync_usage` applies it. Tests must isolate both
 sources (the autouse `usage_files` fixture) and never read the real `~/.claude` or `~/.codex`.

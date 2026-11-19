@@ -31,6 +31,8 @@ Workflow:
    save the prompt to a file with the Write tool and run `decide_route.py --prompt-file <file>`
    first (never quote prompt text into a shell): its route is a floor you may raise from the
    conversation, never lower; approvals keep the approved tier; on exit 3 classify yourself.
+   If it prints `"ask": true` (confidence below `decider.min_confidence`, default 0.9), ask
+   the user to pick its `route` or `alternative`; when you cannot ask, take the higher.
 3. Check engine state:
    python3 "<scripts>/engine_state.py" status
 4. Choose engine, model, and effort:

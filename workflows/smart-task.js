@@ -206,6 +206,11 @@ if (!classification || !ROUTES.includes(classification.route)) {
   classification = parseJson(r.stdout, 'classification')
 }
 let ROUTE = classification.route
+if (classification.ask === true && ROUTES.includes(classification.alternative)) {
+  // The workflow cannot ask the user: take the higher tier.
+  ROUTE = ROUTES[Math.max(ROUTES.indexOf(ROUTE), ROUTES.indexOf(classification.alternative))]
+  log(`decider unsure (${classification.confidence}): took ${ROUTE}`)
+}
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
 
 phase('Route')
