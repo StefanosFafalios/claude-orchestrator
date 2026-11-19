@@ -12,6 +12,7 @@ ROLES = ("implementation", "review", "scout", "style_review", "architecture", "d
 ROUTES = ("trivial", "standard", "complex", "critical", "supercritical")
 LEGACY_KEYS = ("defaults", "codex.tiers", "codex.default_model")
 ASK_ALLOWED = {("review", "supercritical"), ("architecture", "supercritical")}
+TASK_TYPES = ("frontend", "debug", "refactor", "tests", "docs")
 # Trivial work is handled directly: nothing routes a scout, a model review or a docs pass for it.
 # Copies of older templates still carry these rows, so they are ignored, not rejected.
 UNUSED = {("review", "trivial"), ("style_review", "trivial"), ("scout", "trivial"), ("docs", "trivial")}
@@ -27,6 +28,25 @@ def legacy_keys(project_config: dict) -> list[str]:
         if node is not None:
             found.append(key)
     return found
+
+
+def _check_row(entry: dict, where: str, models: dict, ask_ok: bool) -> None:
+    names = entry.get("models")
+    if not isinstance(names, list) or not names or not isinstance(entry.get("effort"), str):
+        raise ConfigError(f"{where} needs a non-empty 'models' list and an 'effort'")
+    for name in names:
+        if name not in models:
+            raise ConfigError(f"{where} names unknown model '{name}'")
+    if entry["effort"] == "ask" and not ask_ok:
+        raise ConfigError(f"{where} cannot use effort 'ask'; only review/architecture supercritical can")
+    per_model = entry.get("model_effort", {})
+    if not isinstance(per_model, dict):
+        raise ConfigError(f"{where} 'model_effort' must be an object")
+    for name, effort in per_model.items():
+        if name not in names:
+            raise ConfigError(f"{where} 'model_effort' names '{name}', which is not in its models")
+        if effort not in EFFORTS:
+            raise ConfigError(f"{where} 'model_effort' for '{name}' must be one of {', '.join(EFFORTS)}")
 
 
 def validate(config: dict) -> None:
@@ -56,32 +76,41 @@ def validate(config: dict) -> None:
             entry = rows.get(route_name)
             if not isinstance(entry, dict):
                 raise ConfigError(f"{where} is missing")
-            names = entry.get("models")
-            if not isinstance(names, list) or not names or not isinstance(entry.get("effort"), str):
-                raise ConfigError(f"{where} needs a non-empty 'models' list and an 'effort'")
-            for name in names:
-                if name not in models:
-                    raise ConfigError(f"{where} names unknown model '{name}'")
-            if entry["effort"] == "ask" and (role, route_name) not in ASK_ALLOWED:
-                raise ConfigError(f"{where} cannot use effort 'ask'; only review/architecture supercritical can")
-            per_model = entry.get("model_effort", {})
-            if not isinstance(per_model, dict):
-                raise ConfigError(f"{where} 'model_effort' must be an object")
-            for name, effort in per_model.items():
-                if name not in names:
-                    raise ConfigError(f"{where} 'model_effort' names '{name}', which is not in its models")
-                if effort not in EFFORTS:
-                    raise ConfigError(f"{where} 'model_effort' for '{name}' must be one of {', '.join(EFFORTS)}")
+            _check_row(entry, where, models, (role, route_name) in ASK_ALLOWED)
+            types = entry.get("types", {})
+            if not isinstance(types, dict):
+                raise ConfigError(f"{where} 'types' must be an object")
+            for type_name, sub in types.items():
+                if type_name not in TASK_TYPES:
+                    raise ConfigError(f"{where} 'types' names unknown task type '{type_name}'")
+                sub_where = f"{where}.types.{type_name}"
+                if not isinstance(sub, dict):
+                    raise ConfigError(f"{sub_where} is missing")
+                _check_row(sub, sub_where, models, (role, route_name) in ASK_ALLOWED)
 
 
-def row(config: dict, role: str, route: str) -> dict:
+def task_type(value: str | None) -> str | None:
+    """Normalized task type, or None when absent, ``general`` or unknown (the tier row applies)."""
+    value = (value or "").strip().lower()
+    return value if value in TASK_TYPES else None
+
+
+def has_type_rows(config: dict) -> bool:
+    return any("types" in entry for rows in config["routing"].values() for entry in rows.values())
+
+
+_normalize = task_type  # ``row`` has a parameter that shadows the function
+
+
+def row(config: dict, role: str, route: str, task_type: str | None = None) -> dict:
     if (role, route) == ("implementation", "supercritical"):
         route = "critical"
     if role == "decider":
         route = "standard"
     if role == "docs" and role not in config["routing"]:
         role = "style_review"
-    return config["routing"][role][route]
+    entry = config["routing"][role][route]
+    return entry.get("types", {}).get(_normalize(task_type), entry)
 
 
 def score(config: dict, model_id: str) -> float:
