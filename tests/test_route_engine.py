@@ -317,6 +317,34 @@ def test_three_way_split_uses_every_healthy_engine(config, monkeypatch):
     assert picks == {"claude", "codex", "openrouter"}
 
 
+@pytest.mark.parametrize("home, model", [("codex", "gpt-6.1-terra"), ("claude", "sonnet")])
+def test_split_prefers_healthy_home_for_same_model(config, monkeypatch, home, model):
+    enable_openrouter(config, monkeypatch)
+    config["models"][model]["engines"]["openrouter"] = "vendor/shared"
+    models = config["routing"]["implementation"]["standard"]["models"]
+    models.remove(model)
+    models.insert(0, model)
+    picks = {route("implementation", "standard", config, state(), task_key=f"task-{i}")["engine"] for i in range(200)}
+    assert home in picks and "openrouter" not in picks
+
+
+@pytest.mark.parametrize("codex_status", ["limited", "near_limit"])
+def test_shared_model_uses_openrouter_when_codex_constrained(config, monkeypatch, codex_status):
+    enable_openrouter(config, monkeypatch)
+    config["models"]["gpt-6.1-terra"]["engines"]["openrouter"] = "vendor/shared"
+    config["routing"]["implementation"]["standard"]["models"] = ["gpt-6.1-terra"]
+    result = route("implementation", "standard", config, state(codex=codex_status, codex_pct=0), task_key="task")
+    assert (result["engine"], result["canonical_model"]) == ("openrouter", "gpt-6.1-terra")
+
+
+def test_shared_model_uses_openrouter_when_codex_excluded(config, monkeypatch):
+    enable_openrouter(config, monkeypatch)
+    config["models"]["gpt-6.1-terra"]["engines"]["openrouter"] = "vendor/shared"
+    config["routing"]["implementation"]["standard"]["models"] = ["gpt-6.1-terra"]
+    result = route("implementation", "standard", config, state(), task_key="task", exclude=("codex",))
+    assert (result["engine"], result["canonical_model"]) == ("openrouter", "gpt-6.1-terra")
+
+
 def split(config, s, task_route="standard", n=400):
     picks = [route("implementation", task_route, config, s, task_key=f"task-{i}")["engine"] for i in range(n)]
     return picks.count("codex") / n

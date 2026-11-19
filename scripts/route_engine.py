@@ -92,6 +92,9 @@ def _select(engines: Engines, model_ids: list[str], task_key: str | None = None,
     if healthy:
         if (split and task_key and balance.get("mode", "adaptive") == "adaptive" and len(healthy) >= 2
                 and route_name in balance.get("routes", DEFAULT_BALANCED)):
+            if "openrouter" in healthy and any(
+                    e != "openrouter" and candidates[e] == candidates["openrouter"] for e in healthy):
+                healthy.remove("openrouter")
             engine, reason = _pick_weighted(engines, healthy, task_key)
         else:
             engine = min(healthy, key=lambda e: model_ids.index(candidates[e]))
