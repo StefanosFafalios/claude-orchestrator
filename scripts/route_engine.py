@@ -92,9 +92,15 @@ def _select(engines: Engines, model_ids: list[str], task_key: str | None = None,
     if healthy:
         if (split and task_key and balance.get("mode", "adaptive") == "adaptive" and len(healthy) >= 2
                 and route_name in balance.get("routes", DEFAULT_BALANCED)):
-            if "openrouter" in healthy and any(
-                    e != "openrouter" and candidates[e] == candidates["openrouter"] for e in healthy):
-                healthy.remove("openrouter")
+            if "openrouter" in healthy:
+                served_elsewhere = {m for m in model_ids for e in healthy if e != "openrouter"
+                                    and model_map.engine_name(config, m, e)}
+                candidate = next((m for m in model_ids if m not in served_elsewhere
+                                  and model_map.engine_name(config, m, "openrouter")), None)
+                if candidate:
+                    candidates["openrouter"] = candidate
+                else:
+                    healthy.remove("openrouter")
             engine, reason = _pick_weighted(engines, healthy, task_key)
         else:
             engine = min(healthy, key=lambda e: model_ids.index(candidates[e]))

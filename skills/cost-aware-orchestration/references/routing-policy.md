@@ -67,9 +67,9 @@ effort applies to whichever model the row picks, including a fallback from the t
 ## Implementation
 
 Among usable engines (enabled, and a listed model resolves on them) that are `healthy`, the task hash picks one with probability proportional to
-headroom (`balance.routes`: standard, complex); other routes use the home engine. A
-healthy Claude or Codex candidate takes precedence over OpenRouter for the same canonical model.
-`near_limit` or `limited` engine is skipped while a healthy candidate exists. If every
+headroom (`balance.routes`: standard, complex); other routes use the home engine.
+A healthy Claude or Codex candidate takes precedence over OpenRouter for the same canonical model.
+A `near_limit` or `limited` engine is skipped while a healthy candidate exists. If every
 candidate is constrained, use the one with the most remaining quota, one atomic task, human
 review. If none is usable: `engine: none`, human review.
 

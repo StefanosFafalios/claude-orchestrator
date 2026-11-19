@@ -144,6 +144,15 @@ def test_directive_shows_only_different_type_rows(project, write_config):
     assert "style=" not in frontend and "docs=" not in frontend
 
 
+def test_directive_omits_type_instruction_when_no_type_lines_are_shown(project, write_config):
+    type_row = {"frontend": {"models": ["haiku"], "effort": "low"}}
+    for tier, prompt in (("standard", "drop the users table"), ("trivial", "add a button")):
+        write_config({"routing": {"implementation": {tier: {"types": type_row}}}})
+        text = context(project, prompt)
+        assert "Types (only if clearly one)" not in text
+        assert "/frontend:" not in text
+
+
 def test_questions_skip_routing(project):
     for prompt in ("Explain the architecture", "How does the router pick an engine?"):
         text = context(project, prompt)

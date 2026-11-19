@@ -99,7 +99,8 @@ def task_type(value: str | None) -> str | None:
 
 def has_type_rows(config: dict) -> bool:
     return any(isinstance(entry, dict) and "types" in entry
-               for role, rows in config["routing"].items() for route, entry in rows.items()
+               for role in ROLES for rows in (config["routing"].get(role),) if isinstance(rows, dict)
+               for route, entry in rows.items()
                if (role, route) not in UNUSED)
 
 

@@ -185,18 +185,21 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
         lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>, then route with --task-id {task_key}.")
     lines.extend(rows)
     if has_type_rows(config):
-        lines.append("Types (only if clearly one): frontend, debug, refactor, tests, docs: state route=<tier>/<type>, use its <tier>/<type> line.")
+        type_lines = []
         for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):
             base = {step.partition("=")[0]: step for step in base_steps}
             for kind in type_kinds(config, tier):
                 typed, _, impl, steps = steps_for(tier, config, state, task_key, permission_mode, kind)
                 if impl is None and tier != "trivial":
                     if base_impl is not None:
-                        lines.append(f"{tier}/{kind}: {typed[len(tier) + 2:]}")
+                        type_lines.append(f"{tier}/{kind}: {typed[len(tier) + 2:]}")
                     continue
                 changed = [step for step in steps if base.get(step.partition("=")[0]) != step]
                 if changed:
-                    lines.append(f"{tier}/{kind}: {'; '.join(changed)}.")
+                    type_lines.append(f"{tier}/{kind}: {'; '.join(changed)}.")
+        if type_lines:
+            lines.append("Types (only if clearly one): frontend, debug, refactor, tests, docs: state route=<tier>/<type>, use its <tier>/<type> line.")
+            lines.extend(type_lines)
     lines.append("Tier change mid-task: switch rows, hand finished work over via a handoff; never downgrade critical. Multi-task plans: route each task with route_engine.py --task-id <task>.")
     lines.append("Visibility: before each step, one line on what starts and why. Run Codex via Bash run_in_background; await its notice, don't read output early. Relay approach and key decisions in <=3 bullets.")
     return "\n".join(lines)

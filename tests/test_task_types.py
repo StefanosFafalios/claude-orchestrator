@@ -95,6 +95,9 @@ def test_stronger_review_type_row_is_picked(config):  # noqa: F811
 
 def test_has_type_rows_skips_unused_and_non_dict_entries(config):  # noqa: F811
     assert not model_map.has_type_rows(config)
+    config["routing"]["_comment"] = "routing notes"
+    config["routing"]["other"] = {"standard": {"types": {"frontend": {}}}}
+    model_map.validate(config)
     config["routing"]["review"]["trivial"] = {"models": ["sonnet"], "effort": "low", "types": {}}
     config["routing"]["scout"]["odd"] = "x"
     assert not model_map.has_type_rows(config)
