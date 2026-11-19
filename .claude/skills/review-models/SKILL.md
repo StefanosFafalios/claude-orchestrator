@@ -78,7 +78,9 @@ for the owner's approval before touching any file.
    `OPENROUTER_MODEL=<slug> OPENROUTER_SANDBOX=read-only python3 scripts/openrouter_run.py <task-file>`, where the task file asks the model to list
    one file.
    This spends real money with the owner's key: get explicit owner approval first, and never
-   print or store the key. Drop models that fail tool calls.
+   print or store the key. Drop models that fail tool calls. Test only new or changed slugs,
+   and never `fable` (the top-priced model): its provider's next model (`opus`) covers the
+   same tool-call path. The 2026-11-19 run of all 11 slugs cost $1.19.
 4. Append a dated entry to `.claude/skills/review-models/decision-log.md`: what changed,
    evidence links, and the spend of the smoke tests.
 5. Run `python3 -m pytest -q && ruff check .`.
