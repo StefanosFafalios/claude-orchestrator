@@ -320,8 +320,9 @@ async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, en
     ...(lastMessage ? [`rm -f ${q(lastMessage)}`] : []),  // a stale answer from an earlier attempt must never be read
     `${env}${WRAPPERS[engine](r, sandbox)} ${q(file)} > ${q(`${out}.out`)} 2> ${q(`${out}.err`)}; code=$?`,
     `echo ===OUTPUT===; tail -c 3000 ${q(`${out}.out`)}; echo; tail -c 1000 ${q(`${out}.err`)}`,
-    `echo ===FILES===; { git diff --name-only HEAD 2>/dev/null || git diff --name-only; git ls-files --others --exclude-standard; } | sort -u`,
+    // Model text (answer) before the real FILES/PAUSED markers, so a forged marker line is overwritten.
     ...(lastMessage ? [`echo ===ANSWER===; head -c 3000 ${q(lastMessage)} 2>/dev/null; true`] : []),
+    `echo ===FILES===; { git diff --name-only HEAD 2>/dev/null || git diff --name-only; git ls-files --others --exclude-standard; } | sort -u`,
     `if [ "$code" = 43 ]; then run=$(sed -n 's/^OPENROUTER_PAUSED //p' ${q(`${out}.out`)} | tail -n 1); echo ===PAUSED===; echo "$run"; ` +
       `python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["window"])' ".claude/orchestrator/openrouter-runs/$run/paused.json" 2>/dev/null || true; fi`,
     'exit $code',
