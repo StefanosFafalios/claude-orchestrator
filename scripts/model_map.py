@@ -37,6 +37,8 @@ def _check_row(entry: dict, where: str, models: dict, ask_ok: bool) -> None:
     for name in names:
         if name not in models:
             raise ConfigError(f"{where} names unknown model '{name}'")
+    if entry["effort"] != "ask" and entry["effort"] not in EFFORTS:
+        raise ConfigError(f"{where} 'effort' must be 'ask' or one of {', '.join(EFFORTS)}")
     if entry["effort"] == "ask" and not ask_ok:
         raise ConfigError(f"{where} cannot use effort 'ask'; only review/architecture supercritical can")
     per_model = entry.get("model_effort", {})
@@ -96,7 +98,9 @@ def task_type(value: str | None) -> str | None:
 
 
 def has_type_rows(config: dict) -> bool:
-    return any("types" in entry for rows in config["routing"].values() for entry in rows.values())
+    return any(isinstance(entry, dict) and "types" in entry
+               for role, rows in config["routing"].items() for route, entry in rows.items()
+               if (role, route) not in UNUSED)
 
 
 _normalize = task_type  # ``row`` has a parameter that shadows the function
