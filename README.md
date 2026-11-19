@@ -212,7 +212,7 @@ Type rows require `models` and `effort`; `model_effort` is optional.
 
 **Adaptive split.** When several engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit
-line), with a healthy home engine preferred over OpenRouter for the same model. For example,
+line). OpenRouter only gets a row model that no healthy Claude or Codex engine serves. For example,
 Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
 one engine gets closer to its limit, more work goes to the others. The choice is a
 deterministic hash of the prompt and session, so the same prompt in a session routes the same way.
