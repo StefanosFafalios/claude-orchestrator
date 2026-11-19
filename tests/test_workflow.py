@@ -527,14 +527,13 @@ def test_supercritical_auto_inherits_parent_effort(repo):
     assert next(c for c in out["calls"] if c["label"] == "plan")["effort"] == "high"
 
 
-def test_supercritical_headless_manual_stops_before_top_model(repo):
+def test_supercritical_default_runs_at_medium_without_permission_mode(repo):
     out = run(repo, {"task": "migrate the billing ledger", "args": {"classification": SUPERCRITICAL},
-                     "agents": {"scout": {"files": [], "impact": "x"}}})
-    assert "plan" not in labels(out["calls"]) and "implement:claude" not in labels(out["calls"])
-    result = out["result"]
-    assert result["requires_human_review"] is True and result["implementation_engine"] == "none"
-    tid = result["task_id"]
-    assert f"set-effort --task-id {tid} --effort <level>, then rerun with task_id: {tid}." in result["summary"]
+                     "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN,
+                                "implement:claude": DONE, "review:claude": NO_FINDINGS,
+                                "review:style": NO_FINDINGS}})
+    plan = next(c for c in out["calls"] if c["label"] == "plan")
+    assert (plan["model"], plan["effort"]) == ("claude-fable-5-2", "medium")
 
 
 def test_supercritical_fix_escalation_never_uses_top_model(repo, write_config):

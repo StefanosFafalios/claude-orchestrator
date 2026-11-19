@@ -11,7 +11,7 @@ map in `templates/orchestrator.config.json`:
 - `models`: canonical model id -> `{score, engines: {claude|codex|openrouter: name}}`
 - `routing`: role (`scout`, `architecture`, `implementation`, `review`, `style_review`, `docs`, `decider`) ->
   route (`trivial`, `standard`, `complex`, `critical`, `supercritical`) ->
-  `{models: [ranked ids], effort}`. Supercritical effort is `"ask"`. `implementation.supercritical`
+  `{models: [ranked ids], effort}`. Supercritical effort is `"medium"` (owner rule: never higher unless the user names it). `implementation.supercritical`
   reuses the critical row: top models never implement.
 
 Never update the map unattended; every change passes owner approval (step 4).
@@ -50,7 +50,7 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
 - Never add a model below the quality bar just to give an engine work (no Codex-only tails):
   unavailable Codex names are skipped automatically.
 - `supercritical` rows hold only the top models, and top models (e.g. `fable`) appear in no
-  other row: their effort is always asked from the user because they are expensive.
+  other row: their effort is `medium` unless the user explicitly names an override.
 - `docs` (the end-of-task doc updater) follows the `style_review` rule: the same models and
   effort, cheapest-first, `low`. A config without `routing.docs` routes on `style_review`.
 - `decider` (the cheap tier classifier) has a single `standard` row: the cheapest models

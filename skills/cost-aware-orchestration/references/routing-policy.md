@@ -26,7 +26,7 @@ The engines are `claude`, `codex` and `openrouter`. An engine disabled in `engin
 | standard | feature work, tests, docs, focused refactor | sonnet / medium |
 | complex | multi-file investigation, debugging, architecture, unknown root cause | sonnet / high, escalate to opus / high only if needed |
 | critical | production, security, migrations, auth/payment changes, irreversible or high blast-radius work | opus / high for planning and review |
-| supercritical | needs frontier reasoning beyond known solutions: novel algorithms, proofs, root causes that defeated a critical attempt | top model (e.g. fable), effort asked from the user |
+| supercritical | needs frontier reasoning beyond known solutions: novel algorithms, proofs, root causes that defeated a critical attempt | top model (e.g. fable) / medium; user-named effort overrides |
 
 ## Re-tiering
 
@@ -53,12 +53,9 @@ other engine's fallback attempt. Applied re-tiers are listed in `reroute_events`
 The top model only reasons, maps the task into sub-tasks (each at most `critical`, each
 routed and implemented on its own tier) and reviews the result; it never implements
 (supercritical implementation uses the `critical` row). It keeps critical's safeguards (architect required,
-never downgraded, human review when engines are constrained). Effort is asked from the user
-before the first top-model step and recorded with `engine_state.py set-effort`. With auto
-mode on, the top-most supercritical task asks once and its descendants inherit the answer
-(`--parent-task-id`); with auto mode off, or when `--permission-mode` is unknown, every
-supercritical task asks. A headless run inherits from an ancestor, else uses `medium` in
-auto mode, else stops with `requires_human_review`.
+never downgraded, human review when engines are constrained). Effort defaults to `medium`;
+an effort the user names with `engine_state.py set-effort` overrides it for that task and
+its descendants. Configurations with an opt-in `ask` row retain the ask flow.
 
 ## Implementation
 
@@ -121,7 +118,7 @@ A constrained pick is skipped.
 ## Architecture
 
 Claude first while healthy: sonnet / high for trivial and standard (used only to escalate a
-failed fix), opus / high for complex and critical, the top model with asked effort for supercritical.
+failed fix), opus / high for complex and critical, the top model / medium for supercritical.
 Claude constrained and another engine usable: that engine.
 Claude near limit and the others limited: Claude sonnet / high instead of opus, with human review.
 

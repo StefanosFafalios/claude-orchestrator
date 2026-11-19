@@ -53,7 +53,7 @@ flowchart TD
     R --> NONE{Any engine<br/>available?}
     NONE -- no --> ASK[Stop and ask the user]
     NONE -- "yes, all constrained" --> ATOM[One atomic task only<br/>human review required]
-    NONE -- yes --> PRE[complex: scout, architect if unclear<br/>critical: scout + architect required<br/>supercritical: top model plans, you pick its effort]
+    NONE -- yes --> PRE[complex: scout, architect if unclear<br/>critical: scout + architect required<br/>supercritical: top model plans at medium effort]
     ATOM --> IMPL
     PRE --> IMPL{Implementation<br/>engine}
     IMPL -- Claude --> CI[implementer agent<br/>may re-tier up/down once]
@@ -256,11 +256,9 @@ after a failed critical attempt (there is no keyword floor).
 
 - The top model **reasons, maps the work into tasks and reviews. It never implements**:
   each planned task is implemented on its own tier, at most `critical`.
-- **You choose its effort** before it first runs on a task (it is costly, so there is no
-  maximum-effort default). In auto mode, the answer is asked once and carried to
-  supercritical child tasks; otherwise every supercritical task asks. A headless run in
-  auto mode inherits an ancestor's answer or uses `medium`; headless without auto mode
-  stops for human review. If the permission mode cannot be read, auto mode counts as off.
+- **Its effort is `medium` by default.** An effort explicitly named by you is recorded with
+  `engine_state.py set-effort --task-id <id> --effort <e>` and also applies to child tasks.
+  Configurations that opt into an `ask` row retain the former ask flow.
 - It keeps critical's safeguards: architect required, never downgraded, human review when
   engines are constrained.
 

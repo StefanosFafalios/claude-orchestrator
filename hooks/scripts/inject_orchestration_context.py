@@ -159,6 +159,8 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
             lines.append(f"Rows marked [{label}] implement on {label}: delegate, do not edit files in this Claude session.")
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
+    elif any(row.startswith("supercritical:") for row in rows):
+        lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>.")
     lines.extend(rows)
     lines.append("Tier change mid-task: switch rows, hand finished work over via a handoff; never downgrade critical. Multi-task plans: route each task with route_engine.py --task-id <task>.")
     lines.append("Visibility: before each step, one line on what starts and why. Run Codex via Bash run_in_background; await its notice, don't read output early. Relay approach and key decisions in <=3 bullets.")

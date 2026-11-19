@@ -126,7 +126,7 @@
           "fable",
           "gpt-6-astra"
         ],
-        "effort": "ask"
+        "effort": "medium"
       }
     },
     "architecture": {
@@ -163,7 +163,7 @@
           "fable",
           "gpt-6-astra"
         ],
-        "effort": "ask"
+        "effort": "medium"
       }
     },
     "scout": {

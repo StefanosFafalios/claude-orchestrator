@@ -342,33 +342,32 @@ def test_adaptive_split_can_be_turned_off(write_config):
     assert split(load_config(), state(claude_pct=30, codex_pct=100)) == 0
 
 
-def test_supercritical_asks_interactively(config):
-    assert route("review", "supercritical", config, state(), "t1")["effort"] == "ask"
+@pytest.mark.parametrize("role", ["review", "architecture"])
+@pytest.mark.parametrize("headless", [False, True])
+def test_default_supercritical_uses_medium_without_human_review(config, role, headless):
+    result = route(role, "supercritical", config, state(), "t1", headless=headless)
+    assert (result["effort"], result["requires_human_review"]) == ("medium", False)
 
 
-def test_recorded_effort_wins(config):
-    s = {**state(), "supercritical_efforts": {"t1": "max"}}
-    assert route("review", "supercritical", config, s, "t1", permission_mode="auto")["effort"] == "max"
+def test_recorded_effort_wins_for_default_row(config):
+    s = {**state(), "supercritical_efforts": {"t1": "high"}}
+    assert route("review", "supercritical", config, s, "t1")["effort"] == "high"
+    # The override is for the top-model rows only; cheap helper roles keep their row effort.
+    assert route("scout", "supercritical", config, s, "t1")["effort"] == "low"
 
 
-def test_auto_mode_inherits_parent(config):
+def test_default_row_inherits_parent_effort_in_any_permission_mode(config):
     s = {**state(), "supercritical_efforts": {"p": "xhigh"}}
-    r = route("review", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="auto")
+    r = route("architecture", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="default")
     assert r["effort"] == "xhigh"
 
 
-def test_manual_mode_does_not_inherit(config):
+def test_opt_in_ask_row_keeps_ask_flow(config):
+    config["routing"]["review"]["supercritical"]["effort"] = "ask"
+    config["routing"]["architecture"]["supercritical"]["effort"] = "ask"
+    assert route("review", "supercritical", config, state(), "t1")["effort"] == "ask"
     s = {**state(), "supercritical_efforts": {"p": "xhigh"}}
-    r = route("review", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="default")
-    assert r["effort"] == "ask"
-
-
-def test_headless_auto_defaults_medium(config):
-    r = route("review", "supercritical", config, state(), "t2", permission_mode="auto", headless=True)
-    assert (r["effort"], r["requires_human_review"]) == ("medium", False)
-
-
-def test_headless_manual_needs_human(config):
+    assert route("review", "supercritical", config, s, "t2", parent_task_id="p", permission_mode="auto")["effort"] == "xhigh"
     r = route("architecture", "supercritical", config, state(), "t2", headless=True)
     assert r["effort"] == "" and r["requires_human_review"] is True and r["engine"] != "none"
     assert "human must choose" in r["reason"]

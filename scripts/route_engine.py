@@ -153,6 +153,9 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
     human = False
     if entry["effort"] == "ask":
         entry["effort"], human = supercritical_effort(state, task_key, parent_task_id, permission_mode, headless)
+    elif (role, task_route) in model_map.ASK_ALLOWED:  # user-named effort: top-model rows only
+        efforts = state.get("supercritical_efforts", {})
+        entry["effort"] = efforts.get(task_key, efforts.get(parent_task_id, entry["effort"]))
     models = list(entry["models"])
     if role == "implementation":
         return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"])

@@ -237,10 +237,14 @@ def test_supercritical_row_and_effort_line(project, write_config, monkeypatch):
     text = context(project, "add a button", permission_mode="auto")
     assert "supercritical = needs frontier reasoning" in text
     row = next(line for line in text.splitlines() if line.startswith("supercritical:"))
-    assert "architect required=architect/" in row and "/ASK" in row and "review=" in row
-    assert "set-effort --task-id" in text and "--permission-mode auto" in text
+    assert "architect required=architect/" in row and "/medium" in row and "review=" in row
+    assert "user-named effort: engine_state.py set-effort --task-id" in text
     floor = context(project, "drop the users table")
     assert "\nsupercritical:" in floor and "Floor: at least critical" in floor
+    write_config({"routing": {role: {"supercritical": {"models": ["fable", "gpt-6-astra"], "effort": "ask"}}
+                                   for role in ("review", "architecture")}})
+    assert "/ASK" in next(line for line in context(project, "add a button").splitlines()
+                          if line.startswith("supercritical:"))
 
 
 def test_legacy_keys_notice(project, write_config):

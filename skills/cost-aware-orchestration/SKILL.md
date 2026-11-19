@@ -48,10 +48,9 @@ Workflow:
 7. Use the `implementer` agent for standard implementation.
 8. Use the `architect` agent for critical work, and for complex work if the design or root cause is unclear.
    `supercritical` work (frontier reasoning) goes to the top model, which only reasons, maps
-   the task into sub-tasks (each at most `critical`) and reviews; it never implements. Before
-   its first step ask the user for the effort and record it with
-   `engine_state.py set-effort --task-id <id> --effort <e>`; route sub-tasks with
-   `--parent-task-id <id> --permission-mode <mode>` from the hook context.
+   the task into sub-tasks (each at most `critical`) and reviews; it never implements. Its
+   effort is `medium` unless the user names one; record that override with
+   `engine_state.py set-effort --task-id <id> --effort <e>`.
 9. When executing a written plan, including Superpowers `executing-plans` or
    `subagent-driven-development`, treat each plan task as its own task: classify and
    route it with `route_engine.py --task-id <plan-task-id>`, implement with the
