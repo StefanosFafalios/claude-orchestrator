@@ -310,14 +310,17 @@ const WRAPPERS = {
 
 // ponytail: one Bash call caps a wrapper run at 10 minutes; split larger work into handoffs.
 // `prompt`, when given, is first written to `file`; `env` is extra environment assignments for the wrapper.
-async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, env = '') {
+// `lastMessage` is a file the engine writes its final answer to; `answer` is its start (`output` is only the tail).
+async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, env = '', lastMessage = '') {
   const out = `${RUN}/${engine}`
+  if (lastMessage) env += `${engine === 'codex' ? 'CODEX' : 'OPENROUTER'}_LAST_MESSAGE=${q(lastMessage)} `
   const res = await bash([
     `mkdir -p ${q(RUN)}`,
     ...(prompt === undefined ? [] : [heredoc(file, prompt)]),
     `${env}${WRAPPERS[engine](r, sandbox)} ${q(file)} > ${q(`${out}.out`)} 2> ${q(`${out}.err`)}; code=$?`,
     `echo ===OUTPUT===; tail -c 3000 ${q(`${out}.out`)}; echo; tail -c 1000 ${q(`${out}.err`)}`,
     `echo ===FILES===; { git diff --name-only HEAD 2>/dev/null || git diff --name-only; git ls-files --others --exclude-standard; } | sort -u`,
+    ...(lastMessage ? [`echo ===ANSWER===; head -c 3000 ${q(lastMessage)} 2>/dev/null; true`] : []),
     `if [ "$code" = 43 ]; then run=$(sed -n 's/^OPENROUTER_PAUSED //p' ${q(`${out}.out`)} | tail -n 1); echo ===PAUSED===; echo "$run"; ` +
       `python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["window"])' ".claude/orchestrator/openrouter-runs/$run/paused.json" 2>/dev/null || true; fi`,
     'exit $code',
@@ -325,7 +328,7 @@ async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, en
   const s = sections(res.stdout)
   const [run, window] = (s.PAUSED || '').split('\n')
   return {
-    code: res.exit_code, output: s.OUTPUT || res.stderr,
+    code: res.exit_code, output: s.OUTPUT || res.stderr, answer: (s.ANSWER || '').trim(),
     files: (s.FILES || '').split('\n').filter(f => f && !f.startsWith('.claude/')),
     paused: res.exit_code === 43 &&
       `OpenRouter paused over its ${window ? `${window} ` : ''}budget: run openrouter_run.py --resume ${run} or --stop ${run}.`,
@@ -386,9 +389,9 @@ async function plan() {
       if (p.rollback) context += `\nRollback: ${p.rollback}`
     }
   } else if (ar.engine !== 'none') {
-    const w = await runWrapper(ar.engine, ar, `${RUN}/plan.md`, 'read-only', `plan:${ar.engine}`, 'Plan', prompt)
+    const w = await runWrapper(ar.engine, ar, `${RUN}/plan.md`, 'read-only', `plan:${ar.engine}`, 'Plan', prompt, '', `${RUN}/plan-answer.md`)
     if (w.paused) return stop(w.paused)
-    if (w.code === 0) context += `\n\nArchitect plan (${ar.model}):\n${w.output.slice(-3000)}`
+    if (w.code === 0) context += `\n\nArchitect plan (${ar.model}):\n${w.answer || w.output.slice(-3000)}`
     else log(`plan failed (${ar.engine} exit ${w.code}); continuing without a plan`)
   } else {
     log(`plan skipped: ${ar.reason}`)
@@ -418,10 +421,10 @@ async function scoutPass() {
       }
       return null
     }
-    const w = await runWrapper(sr.engine, sr, `${RUN}/scout.md`, 'read-only', `scout:${sr.engine}`, 'Scout', `${prompt}\nDo not modify files.`)
+    const w = await runWrapper(sr.engine, sr, `${RUN}/scout.md`, 'read-only', `scout:${sr.engine}`, 'Scout', `${prompt}\nDo not modify files.`, '', `${RUN}/scout-answer.md`)
     if (w.paused) return stop(w.paused)
     if (w.code !== 42) {
-      if (w.code === 0) context += `\n\nScout findings (${sr.model}):\n${w.output.slice(-3000)}`
+      if (w.code === 0) context += `\n\nScout findings (${sr.model}):\n${w.answer || w.output.slice(-3000)}`
       else log(`scout failed (${sr.engine} exit ${w.code}); continuing without it`)
       return null
     }
@@ -455,9 +458,9 @@ async function researchPass(query) {
       code = r ? 0 : 1
       report = r ? r.report : ''
     } else if (rr.engine === 'codex') {
-      const w = await runWrapper('codex', rr, `${RUN}/research-prompt.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ')
+      const w = await runWrapper('codex', rr, `${RUN}/research-prompt.md`, 'read-only', 'research:codex', 'Research', prompt, 'CODEX_SEARCH=1 ', `${RUN}/research-answer.md`)
       code = w.code
-      report = w.output.slice(0, 3000)
+      report = w.answer || w.output.slice(0, 3000)
     } else {
       const file = `${RUN}/research-query.txt`
       const out = `${RUN}/research.out`

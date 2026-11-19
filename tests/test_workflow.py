@@ -717,6 +717,34 @@ def test_codex_research_uses_search_and_read_only_sandbox(repo, write_config):
     assert "CODEX_SEARCH=1" in command and "CODEX_SANDBOX=read-only" in command
 
 
+def long_codex(write_config, monkeypatch, tmp_path, body, route, role):
+    """Fake Codex that writes `body` to its -o file and a long stdout, so only the file keeps the start."""
+    codex = tmp_path / "codex-long"
+    codex.write_text('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf "%s" "$BODY" > "$2"; shift; done\n'
+                     'echo "START-OF-STDOUT"; head -c 5000 /dev/zero | tr "\\0" x; echo\n')
+    codex.chmod(0o755)
+    monkeypatch.setenv("CODEX_BIN", str(codex))
+    monkeypatch.setenv("BODY", body)
+    write_config({"balance": {"mode": "off"}, "routing": {role: {route: {"models": ["gpt-6.1-terra", "haiku"], "effort": "low"}}}})
+
+
+CODEX_ROLES = [("research", "standard", "Research report"), ("scout", "standard", "Scout findings"),
+               ("architecture", "complex", "Architect plan")]
+
+
+@pytest.mark.parametrize("role, route, heading", CODEX_ROLES)
+@pytest.mark.parametrize("body, kept", [("FINDINGS-FIRST " + "y" * 5000, "FINDINGS-FIRST"), ("", "x" * 100)])
+def test_long_codex_answer_keeps_its_start(repo, write_config, monkeypatch, tmp_path, role, route, heading, body, kept):
+    long_codex(write_config, monkeypatch, tmp_path, body, route, role)
+    classification = dict(FLAGGED, route=route, research_query=QUERY if role == "research" else "")
+    out = run(repo, {"task": "update the parser", "args": {"classification": classification},
+                     "agents": dict(SCOUT_AGENTS, plan=PLAN, research=RESEARCH)})
+    prompt = next(c for c in out["calls"] if c["label"] == "implement:claude")["prompt"]
+    section = prompt[prompt.index(heading):]
+    assert kept in section
+    assert "START-OF-STDOUT" not in section
+
+
 def test_architect_research_query_runs_one_research_after_plan(repo, write_config):
     write_config({"balance": {"mode": "off"}})
     out = run(repo, {"task": "update the parser", "args": {"classification": {"route": "complex", "reason": "test"}},

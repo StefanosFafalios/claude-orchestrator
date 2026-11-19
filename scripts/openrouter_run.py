@@ -67,6 +67,8 @@ def build_command(config: dict, prompt: str) -> list:
     cmd = [os.environ.get("CODEX_BIN") or "codex", "exec", "--sandbox", sandbox, "--model", model]
     for name, value in overrides.items():
         cmd += ["-c", f"{name}={json.dumps(value)}"]
+    if os.environ.get("OPENROUTER_LAST_MESSAGE"):
+        cmd += ["-o", os.environ["OPENROUTER_LAST_MESSAGE"]]  # exec option: the final message, untruncated
     return cmd + [prompt]
 
 
