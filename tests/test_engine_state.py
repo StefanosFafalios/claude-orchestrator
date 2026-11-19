@@ -90,7 +90,7 @@ def test_project_config_overrides_only_given_fields(write_config):
     assert config["thresholds"]["near_limit_pct"] == 40
     assert config["thresholds"]["critical_limit_pct"] == 10
     assert config["commands"]["test"] == "make test"
-    assert config["defaults"]["scout_model"] == "haiku"
+    assert "defaults" not in config
     assert config["automatic"] is True
 
 
@@ -105,3 +105,28 @@ def test_invalid_config_is_a_clear_error(write_config, capsys):
 def test_corrupt_state_falls_back_to_defaults(project):
     (project / ".claude" / "engine-state.json").write_text("garbage")
     assert load_state()["claude"]["status"] == "healthy"
+
+
+def test_openrouter_disabled_without_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    config = {"engines": {"openrouter": True}, "openrouter": {"key_env": "OPENROUTER_API_KEY"}}
+    assert engine_state.engine_enabled(config, "openrouter") is False
+
+
+def test_openrouter_enabled_with_key(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    config = {"engines": {"openrouter": True}, "openrouter": {"key_env": "OPENROUTER_API_KEY"}}
+    assert engine_state.engine_enabled(config, "openrouter") is True
+    assert engine_state.engine_enabled({"engines": {}}, "codex") is True
+
+
+def test_state_has_three_engines(project):
+    assert set(engine_state.ENGINES) <= set(load_state())
+
+
+def test_set_effort_records_and_validates(project, capsys):
+    assert main(["set-effort", "--task-id", "t1", "--effort", "high"]) == 0
+    assert load_state()["supercritical_efforts"] == {"t1": "high"}
+    assert main(["set-effort", "--task-id", "../x", "--effort", "high"]) == 2
+    main(["reset"])
+    assert load_state()["supercritical_efforts"] == {}

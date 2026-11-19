@@ -43,6 +43,19 @@ def codex_models() -> set[str] | None:
             if isinstance(model, dict) and isinstance(model.get("slug"), str)}
 
 
+def openrouter_models() -> set[str] | None:
+    """Model ids from the OpenRouter models cache, or ``None`` when absent."""
+    import openrouter_budget
+    try:
+        data = json.loads(openrouter_budget.models_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return None
+    return {model for model in models if isinstance(model, str)}
+
+
 def _seconds(value) -> float | None:
     if not isinstance(value, (int, float)):
         return None
@@ -123,8 +136,33 @@ def codex_usage(now: float | None = None) -> dict | None:
     return None
 
 
-def observe() -> dict:
-    return {"claude": claude_usage(), "codex": codex_usage()}
+def openrouter_usage(config: dict, now: float | None = None) -> dict | None:
+    """Spend pace from the cached key snapshot; ``None`` unless OpenRouter is enabled."""
+    import openrouter_budget
+    from engine_state import engine_enabled
+    if not engine_enabled(config, "openrouter"):
+        return None
+    snapshot = openrouter_budget.read_snapshot()
+    if snapshot is None:
+        return None
+    now = time.time() if now is None else now
+    budget = config["openrouter"]["budget"]
+    wins = openrouter_budget.windows(snapshot, budget, now, config["thresholds"]["near_limit_pct"])
+    obs = observation(wins, snapshot["observed_at"], "openrouter-key-cache", now)
+    if obs is not None:
+        # The pace window never resets, so a limited OpenRouter would stay limited until a run
+        # refreshed the cache, and nothing routes to a limited engine. A snapshot from before
+        # today's UTC window with no cap still spent counts as a reset.
+        day_start = openrouter_budget.window_starts(now)[0].timestamp()
+        obs["windows_reset"] = snapshot["observed_at"] < day_start and not openrouter_budget.cap_spent(snapshot, budget, now)
+    return obs
+
+
+def observe(config: dict | None = None) -> dict:
+    found = {"claude": claude_usage(), "codex": codex_usage()}
+    if config is not None:
+        found["openrouter"] = openrouter_usage(config)
+    return found
 
 
 if __name__ == "__main__":

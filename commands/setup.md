@@ -57,9 +57,28 @@ ask before every change. Change only `.claude/`, instruction files (`CLAUDE.md`,
    `needs_dedupe` result, show the merged common file and ask whether to remove duplicates
    and contradictions; only on yes, edit that file to resolve them.
 
-6. **Git hygiene**: if the project is a git repository and `.gitignore` lacks them, offer
+6. **OpenRouter** (optional engine): ask whether to enable it; skip on no. Never ask for or
+   print the API key, and never store it in the project; only check that the variable is set.
+   1. Account: open https://openrouter.ai, sign in, then Settings -> Credits -> add credits.
+   2. Ask the yearly allowance in USD, run
+      `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter_budget.py" caps --yearly-usd <N>`
+      and show the monthly, weekly and daily caps.
+   3. Settings -> Keys -> Create Key: name `cost-aware-orchestrator`, credit limit = the monthly
+      cap, reset = monthly.
+   4. Guardrails: check Settings for Guardrails/budgets. If present, add a daily budget (the
+      daily cap) and a weekly budget (the weekly cap) to that key; if absent, say the plugin
+      enforces daily and weekly caps by pausing runs.
+   5. Key storage: the user adds `export OPENROUTER_API_KEY="sk-or-v1-..."` to `~/.bashrc`
+      (or `~/.zshrc`) themselves, then runs `source` on it or opens a new terminal. Never in
+      the project, never pasted into chat. Check with `[ -n "$OPENROUTER_API_KEY" ]` only.
+   6. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/openrouter_budget.py" verify`. On
+      `matches: false`, show the mismatch and repeat step 3. Then run `... openrouter_budget.py refresh`.
+   7. On yes, write `engines.openrouter: true` and `openrouter.budget` (`yearly_usd`,
+      `monthly_usd`, `weekly_usd`, `daily_usd`) into the project config.
+
+7. **Git hygiene**: if the project is a git repository and `.gitignore` lacks them, offer
    to add `.claude/engine-state.json` and `.claude/orchestrator/`.
 
-7. Finish with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status` and a
+8. Finish with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status` and a
    summary: which engines are ready, whether usage tracking is active for each, and
    which config values are still empty.

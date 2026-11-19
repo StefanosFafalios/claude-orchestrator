@@ -14,7 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from engine_state import PLUGIN_ROOT, ConfigError, load_config, project_dir, redact
+from engine_state import ENGINES, PLUGIN_ROOT, ConfigError, load_config, project_dir, redact
+from model_map import ROUTES
 
 TEMPLATE = PLUGIN_ROOT / "templates" / "handoff.md"
 MAX_DIFF_CHARS = 60_000
@@ -85,9 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--objective", required=True)
-    parser.add_argument("--task-route", choices=("trivial", "standard", "complex", "critical"), required=True)
+    parser.add_argument("--task-route", choices=ROUTES, required=True)
     parser.add_argument("--source-engine", required=True, help="engine that did (or would have done) the work")
-    parser.add_argument("--target-engine", choices=("claude", "codex"), required=True)
+    parser.add_argument("--target-engine", choices=ENGINES, required=True)
     parser.add_argument("--completed-work", default="")
     parser.add_argument("--remaining-work", default="")
     parser.add_argument("--relevant-file", action="append", help="repeatable")

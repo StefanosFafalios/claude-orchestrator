@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from engine_state import ConfigError, load_config, load_state  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
+LABELS = {"codex": "Codex", "openrouter": "OpenRouter"}
 AGENTS = {"scout", "implementer", "architect", "verifier", "codex-reviewer", "style-reviewer"}
 
 
@@ -38,9 +39,11 @@ def violation(agent: str, prompt: str, root: Path) -> str | None:
     state = load_state(root)
 
     if agent == "implementer" and state["claude"].get("status") == "limited":
-        return "Claude is marked limited: write a handoff and route implementation to Codex instead."
-    if agent == "codex-reviewer" and state["codex"].get("status") == "limited":
-        return "Codex is marked limited: use the verifier agent for review instead."
+        return "Claude is marked limited: write a handoff and route implementation to another engine instead."
+    if agent == "codex-reviewer":
+        engine = "openrouter" if "openrouter_run.py" in prompt else "codex"
+        if state[engine].get("status") == "limited":
+            return f"{LABELS[engine]} is marked limited: use the verifier agent for review instead."
     return None
 
 

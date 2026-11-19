@@ -3,6 +3,9 @@
 import json
 import shutil
 import subprocess
+import sys
+import threading
+import time
 
 import pytest
 from conftest import ROOT
@@ -19,9 +22,9 @@ def repo(project, monkeypatch, tmp_path_factory):
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     bin_dir = tmp_path_factory.mktemp("bin")
     codex = bin_dir / "codex"
-    # Fake Codex: behaviour chosen by FAKE_CODEX=ok|limit.
+    # Fake Codex: behaviour chosen by FAKE_CODEX=ok|limit; FAKE_SLEEP delays it.
     codex.write_text('#!/bin/sh\nif [ "$FAKE_CODEX" = limit ]; then echo "You have hit your usage limit" >&2; exit 1; fi\n'
-                     'echo "changed app.py" > app.py\necho "codex done"\n')
+                     'sleep "${FAKE_SLEEP:-0}"\necho "changed app.py" > app.py\necho "codex done"\n')
     codex.chmod(0o755)
     monkeypatch.setenv("CODEX_BIN", str(codex))
     return project
@@ -47,12 +50,15 @@ def state(project):
     return json.loads((project / ".claude" / "engine-state.json").read_text())
 
 
-def test_standard_task_on_claude(repo):
+def test_review_uses_capability_not_engine(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {
         "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:codex": NO_FINDINGS}})
     result, calls = out["result"], out["calls"]
     assert (result["route"], result["implementation_engine"], result["implementation_model"]) == ("standard", "claude", "sonnet")
-    assert result["review_engine"] == "codex", "claude-implemented work is reviewed on codex"
+    assert result["review_engine"] == "codex", "gpt-6.1-terra is the first reviewer at least as capable as sonnet"
+    review = next(c for c in calls if c["label"] == "review:codex")
+    assert "codex_with_fallback.sh" in review["prompt"] and "gpt-6.1-terra" in review["prompt"]
     assert result["fallback_events"] == []
     assert "plan" not in labels(calls)
     impl = next(c for c in calls if c["label"] == "implement:claude")
@@ -63,7 +69,7 @@ STYLE_FINDING = {"findings": [{"severity": "low", "category": "reduction", "titl
 
 
 def test_style_review_runs_in_parallel_and_merges(repo, write_config):
-    write_config({"commands": {"lint": "echo lint-ok"}})
+    write_config({"commands": {"lint": "echo lint-ok"}, "balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {
         "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
         "review:codex": {"exit_code": 0, "findings": [{"severity": "medium", "category": "correctness", "title": "bug"}]},
@@ -79,8 +85,134 @@ def test_style_review_runs_in_parallel_and_merges(repo, write_config):
     assert "style review is skipped" not in main["prompt"]
 
 
+SCOUT_AGENTS = {"scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE,
+                "review:codex": NO_FINDINGS, "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS,
+                "review:style:openrouter": dict(NO_FINDINGS, exit_code=0)}
+
+
+def or_first_scout_and_style(write_config, monkeypatch, task_route):
+    """OpenRouter on, with the scout and style rows led by an OpenRouter-only model."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("OPENROUTER_POLL_SECONDS", "0.2")
+    cheap = {"models": ["or-cheap", "haiku"], "effort": "low"}
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                  "models": {"or-cheap": {"score": 60, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"scout": {task_route: cheap}, "style_review": {task_route: cheap}}})
+    return {"route": task_route, "reason": "test"}
+
+
+@pytest.mark.parametrize("task_route", ["standard", "complex"])
+def test_scout_and_style_review_run_on_openrouter(repo, write_config, monkeypatch, fake_openrouter, task_route):
+    classification = or_first_scout_and_style(write_config, monkeypatch, task_route)
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": classification}, "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert out["result"]["route"] == task_route
+    assert "scout" not in calls and calls["scout:openrouter"]["exit_code"] == 0
+    assert list(repo.joinpath(*RUNS).iterdir()), "the scout ran through openrouter_run.py"
+    assert "Scout findings (vendor/cheap):" in calls["implement:claude"]["prompt"]
+    style = calls["review:style:openrouter"]
+    assert style["agentType"] == "cost-aware-orchestrator:codex-reviewer" and "review:style" not in calls
+    assert "openrouter_run.py" in style["prompt"] and "vendor/cheap" in style["prompt"]
+    assert "This is the style review" in style["prompt"]
+
+
+def test_scout_usage_limit_reroutes_to_claude(repo, write_config, monkeypatch, fake_openrouter):
+    fake_openrouter.key_data["limit_remaining"] = 0  # the runner refuses with exit 42
+    classification = or_first_scout_and_style(write_config, monkeypatch, "standard")
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": classification}, "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert calls["scout:openrouter"]["exit_code"] == 42
+    assert (calls["scout"]["agentType"], calls["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
+    assert {"phase": "scout", "from": "openrouter", "to": "claude", "reason": "openrouter usage limit"} in out["result"]["fallback_events"]
+    assert state(repo)["openrouter"]["status"] == "limited"
+    assert calls["review:style"]["model"] == "haiku", "style review re-routed away from the limited engine"
+
+
+def test_claude_only_scout_and_style_use_agents(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert (calls["scout"]["agentType"], calls["scout"]["model"]) == ("cost-aware-orchestrator:scout", "haiku")
+    assert (calls["review:style"]["agentType"], calls["review:style"]["model"]) == ("cost-aware-orchestrator:style-reviewer", "haiku")
+
+
+DOCS = {"changed": True, "files": ["CLAUDE.md"], "reason": "new command"}
+NO_DOCS = {"engine": "none", "changed": False, "files": []}
+
+
+def test_standard_task_ends_with_doc_updater(repo, write_config):
+    write_config({"engines": {"codex": False}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    docs = out["calls"][-1]
+    assert (docs["label"], docs["agentType"], docs["model"], docs["effort"]) == (
+        "docs", "cost-aware-orchestrator:doc-updater", "haiku", "low")
+    assert "add unit tests for parser" in docs["prompt"] and "app.py" in docs["prompt"]
+    assert out["result"]["docs"] == {"engine": "claude", "changed": True, "files": ["CLAUDE.md"]}
+
+
+def openrouter_docs(write_config, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("OPENROUTER_POLL_SECONDS", "0.2")
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                  "models": {"or-cheap": {"score": 60, "engines": {"openrouter": "vendor/cheap"}}},
+                  "routing": {"docs": {"standard": {"models": ["or-cheap", "haiku"], "effort": "low"}}}})
+
+
+def test_doc_updater_runs_on_openrouter_with_agent_rules(repo, write_config, monkeypatch, fake_openrouter):
+    openrouter_docs(write_config, monkeypatch)
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert "docs" not in calls and calls["docs:openrouter"]["exit_code"] == 0
+    command = calls["docs:openrouter"]["command"]
+    assert "OPENROUTER_SANDBOX=workspace-write" in command and "openrouter_run.py" in command and "vendor/cheap" in command
+    rules = (ROOT / "agents" / "doc-updater.md").read_text().split("---\n", 2)[2].strip()
+    prompt = (repo / ".claude" / "orchestrator" / "runs" / out["result"]["task_id"] / "docs.md").read_text()
+    assert rules in prompt, "external engines get the doc-updater rules verbatim"
+    assert "add unit tests for parser" in prompt
+    # The fake engine prints no JSON and changes no file beyond the implementation's.
+    assert out["result"]["docs"] == {"engine": "openrouter", "changed": False, "files": []}
+
+
+def test_out_of_scope_docs_edit_needs_human_review(repo, write_config, monkeypatch, fake_openrouter):
+    """The docs pass runs after review: an edit outside the AI-doc scope would otherwise land unreviewed."""
+    openrouter_docs(write_config, monkeypatch)
+    agents = dict(SCOUT_AGENTS, **{"implement:claude": dict(DONE, files_changed=["parser.py"])})
+    out = run(repo, {"task": "add unit tests for parser", "agents": agents})
+    result = out["result"]
+    assert result["docs"]["out_of_scope"] == ["app.py"], "the fake engine wrote app.py, which is code"
+    assert result["requires_human_review"] is True
+
+
+def test_doc_updater_usage_limit_reroutes_to_claude(repo, write_config, monkeypatch, fake_openrouter):
+    fake_openrouter.key_data["limit_remaining"] = 0  # the runner refuses with exit 42
+    openrouter_docs(write_config, monkeypatch)
+    out = run(repo, {"task": "add unit tests for parser", "agents": dict(SCOUT_AGENTS, docs=DOCS)})
+    calls = {c["label"]: c for c in out["calls"]}
+    assert calls["docs:openrouter"]["exit_code"] == 42
+    assert calls["docs"]["agentType"] == "cost-aware-orchestrator:doc-updater"
+    assert {"phase": "docs", "from": "openrouter", "to": "claude", "reason": "openrouter usage limit"} in out["result"]["fallback_events"]
+    assert state(repo)["openrouter"]["status"] == "limited"
+    assert out["result"]["docs"]["engine"] == "claude"
+
+
+def test_failed_tests_skip_doc_updater(repo, write_config):
+    write_config({"engines": {"codex": False}, "commands": {"test": "echo FAIL; exit 1"}})
+    agents = dict(SCOUT_AGENTS, docs=DOCS, **{"implement:claude": [DONE, DONE, DONE]})
+    out = run(repo, {"task": "add unit tests for parser", "agents": agents})
+    assert out["result"]["tests"]["passed"] is False
+    assert "docs" not in labels(out["calls"]) and out["result"]["docs"] == NO_DOCS
+
+
+def test_constrained_scout_is_not_run(repo, write_config):
+    # Near the limit the router asks for one atomic task and a human: not worth a scout.
+    write_config({"engines": {"codex": False}})
+    (repo / ".claude" / "engine-state.json").write_text(json.dumps({"claude": {"status": "near_limit", "remaining_pct": 20}}))
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert "scout" not in labels(out["calls"]) and "implement:claude" in labels(out["calls"])
+
+
 def test_unsplit_review_skips_style_agent(repo, write_config):
-    write_config({"review": {"split": False}})
+    write_config({"review": {"split": False}, "balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {
         "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": DONE, "review:codex": NO_FINDINGS}})
     assert "review:style" not in labels(out["calls"])
@@ -96,11 +228,18 @@ def test_failed_style_agent_is_not_a_failure(repo):
     assert out["result"]["lint"] == {"skipped": True}
 
 
-def test_trivial_task_skips_scout_and_plan(repo):
+def test_trivial_task_skips_scout_plan_and_review(repo, write_config):
+    write_config({"commands": {"lint": "echo lint-bad; exit 1"}})
     out = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
-    assert out["result"]["implementation_model"] == "haiku"
-    assert "scout" not in labels(out["calls"]) and "plan" not in labels(out["calls"])
-    assert "review:style" not in labels(out["calls"])
+    result = out["result"]
+    assert result["implementation_model"] == "haiku"
+    assert not [c for c in labels(out["calls"]) if c in ("scout", "plan", "docs") or c.startswith(("review:", "route:docs"))]
+    assert result["docs"] == NO_DOCS
+    assert result["review_engine"] == "none"
+    assert result["lint"]["passed"] is False and result["requires_human_review"] is True, "lint gates trivial work"
+    write_config({"commands": {"lint": "echo lint-ok"}})
+    clean = run(repo, {"task": "fix typo in README", "agents": {"implement:claude": DONE}})["result"]
+    assert clean["lint"]["passed"] is True and clean["requires_human_review"] is False
 
 
 def test_critical_task_plans_and_reviews_on_codex(repo):
@@ -132,7 +271,8 @@ def test_claude_limited_routes_implementation_to_codex(repo):
     assert "## Replacement engine\ncodex" in handoff
 
 
-def test_claude_usage_limit_mid_task_hands_remaining_work_to_codex(repo):
+def test_claude_usage_limit_mid_task_hands_remaining_work_to_codex(repo, write_config):
+    write_config({"balance": {"mode": "off"}})
     limited = dict(DONE, status="partial", completed_work="Wrote parser tests for dates",
                    remaining_work="Write parser tests for numbers", usage_limited=True)
     out = run(repo, {"task": "add unit tests for parser", "agents": {
@@ -238,6 +378,23 @@ def test_scout_cannot_downgrade_critical(repo, write_config):
     assert out["result"]["reroute_events"] == []
 
 
+def test_review_after_escalated_fix_excludes_every_writer(repo, write_config):
+    """Sonnet implements, Codex terra fixes: neither reviews; opus is at least as capable as both."""
+    write_config({"commands": {"test": "grep -q changed app.py 2>/dev/null || { echo FAIL; exit 1; }"},
+                  "balance": {"mode": "off"}})
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "x"}, "implement:claude": [DONE, DONE],
+        "review:claude": NO_FINDINGS, "review:codex": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    result = out["result"]
+    assert [(e["engine"], e["why"]) for e in result["fix_events"]] == [
+        ("claude", "fix pass on the same engine"), ("codex", "escalation to another engine")]
+    assert result["tests"]["passed"] is True
+    assert result["review_engine"] == "claude" and "review:codex" not in labels(out["calls"])
+    assert next(c for c in out["calls"] if c["label"] == "review:claude")["model"] == "opus"
+    route = next(c for c in out["calls"] if c["label"] == "route" and "'gpt-6.1-terra'" in c["command"])
+    assert "--implementation-model 'sonnet' --implementation-model 'gpt-6.1-terra'" in route["command"]
+
+
 def test_implementer_reroutes_with_handoff(repo, write_config):
     write_config({"balance": {"mode": "off"}})
     partial = dict(DONE, status="partial", completed_work="investigated", remaining_work="finish change",
@@ -287,3 +444,144 @@ def test_resumed_handoff_skips_scout_and_plan(repo, write_config):
     out = run(repo, {"task": "debug the flaky parser", "args": {"handoff": ".claude/orchestrator/handoffs/t.md"},
                      "agents": {"implement:claude": DONE, "review:codex": NO_FINDINGS}})
     assert "scout" not in labels(out["calls"]) and "plan" not in labels(out["calls"])
+
+
+OR_MODEL = "openai/gpt-6.1-terra"
+RUNS = (".claude", "orchestrator", "openrouter-runs")
+
+
+@pytest.fixture
+def openrouter(repo, write_config, fake_openrouter, monkeypatch):
+    """Enable OpenRouter with gpt-6.1-terra on it; the runner reaches the fake key server."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("OPENROUTER_POLL_SECONDS", "0.2")
+
+    def configure(**extra):
+        write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"},
+                      "models": {"gpt-6.1-terra": {"engines": {"openrouter": OR_MODEL}}}, **extra})
+    return configure
+
+
+def test_fallback_claude_to_openrouter_when_codex_limited(repo, openrouter):
+    openrouter()
+    set_state(repo, codex="limited")
+    limited = dict(DONE, status="partial", completed_work="Wrote parser tests for dates",
+                   remaining_work="Write parser tests for numbers", usage_limited=True)
+    out = run(repo, {"task": "add unit tests for parser", "agents": {
+        "scout": {"files": ["parser.py"], "impact": "small"}, "implement:claude": limited}})
+    result = out["result"]
+    assert result["fallback_events"][0]["from"] == "claude" and result["fallback_events"][0]["to"] == "openrouter"
+    assert (result["implementation_engine"], result["implementation_model"]) == ("openrouter", OR_MODEL)
+    assert result["files_changed"] == ["app.py"]
+    assert state(repo)["claude"]["status"] == "limited"
+    handoff = (repo / result["fallback_events"][0]["handoff"]).read_text()
+    assert "## Replacement engine\nopenrouter" in handoff and "## Remaining work\nWrite parser tests for numbers" in handoff
+
+
+def test_openrouter_pause_stops_for_human(repo, openrouter, fake_openrouter, monkeypatch):
+    openrouter(openrouter={"budget": {"daily_usd": 1}})
+    set_state(repo, claude="limited", codex="limited")
+    monkeypatch.setenv("FAKE_SLEEP", "5")
+    runs = repo.joinpath(*RUNS)
+
+    def overspend():  # once Codex runs, the next spend poll crosses the daily cap
+        deadline = time.monotonic() + 30
+        while not list(runs.glob("*/pid")) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        fake_openrouter.key_data["usage_daily"] = 5
+
+    threading.Thread(target=overspend, daemon=True).start()
+    out = run(repo, {"task": "add unit tests for parser", "agents": {}})
+    run_id = next(runs.iterdir()).name
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "openrouter_run.py"), "--stop", run_id], capture_output=True)
+    result = out["result"]
+    assert result["requires_human_review"] is True
+    assert result["summary"] == (f"OpenRouter paused over its daily budget: run openrouter_run.py --resume {run_id}"
+                                 f" or --stop {run_id}.")
+    assert not [c for c in out["calls"] if c["kind"] == "agent"]
+
+
+SUPERCRITICAL = {"route": "supercritical", "reason": "test"}
+PLAN = {"assessment": "a", "steps": ["s"], "risks": [], "test_strategy": "t"}
+
+
+def test_supercritical_headless_auto_uses_medium(repo):
+    out = run(repo, {"task": "migrate the billing ledger", "args": {"classification": SUPERCRITICAL, "permission_mode": "auto"},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN, "implement:claude": DONE,
+                                "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    calls = out["calls"]
+    plan = next(c for c in calls if c["label"] == "plan")
+    assert (plan["model"], plan["effort"]) == ("claude-fable-5-2", "medium")
+    assert next(c for c in calls if c["label"] == "implement:claude")["model"] == "opus"
+    review = next(c for c in calls if c["label"] == "review:claude")
+    assert (review["model"], review["effort"]) == ("claude-fable-5-2", "medium")
+    assert out["result"]["route"] == "supercritical"
+
+
+def test_supercritical_auto_inherits_parent_effort(repo):
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "engine_state.py"), "set-effort", "--task-id", "parent-1",
+                    "--effort", "high"], check=True, capture_output=True)
+    out = run(repo, {"task": "migrate the billing ledger", "args": {
+        "classification": SUPERCRITICAL, "permission_mode": "auto", "parent_task_id": "parent-1"},
+        "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN, "implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    assert next(c for c in out["calls"] if c["label"] == "plan")["effort"] == "high"
+
+
+def test_supercritical_default_runs_at_medium_without_permission_mode(repo):
+    out = run(repo, {"task": "migrate the billing ledger", "args": {"classification": SUPERCRITICAL},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN,
+                                "implement:claude": DONE, "review:claude": NO_FINDINGS,
+                                "review:style": NO_FINDINGS}})
+    plan = next(c for c in out["calls"] if c["label"] == "plan")
+    assert (plan["model"], plan["effort"]) == ("claude-fable-5-2", "medium")
+
+
+def test_supercritical_fix_escalation_never_uses_top_model(repo, write_config):
+    write_config({"commands": {"test": "echo FAIL; exit 1"}})
+    out = run(repo, {"task": "migrate the billing ledger", "args": {"classification": SUPERCRITICAL, "permission_mode": "auto"},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "plan": PLAN, "implement:claude": [DONE, DONE],
+                                "review:claude": NO_FINDINGS, "review:style": NO_FINDINGS}})
+    impls = [c for c in out["calls"] if c["label"] == "implement:claude"]
+    assert len(impls) == 2 and all(c["model"] == "opus" for c in impls), "the top model never implements"
+    assert [e["why"] for e in out["result"]["fix_events"]] == ["fix pass on the same engine"]
+
+
+def test_unavailable_architecture_skips_plan(repo, write_config):
+    write_config({"balance": {"mode": "off"},
+                  "routing": {"architecture": {"complex": {"models": ["gpt-6-astra"], "effort": "high"}}}})
+    set_state(repo, codex="limited")
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {"route": "complex", "reason": "test"}},
+                     "agents": {"scout": {"files": [], "impact": "x"}, "implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    assert "plan" not in labels(out["calls"]) and "implement:claude" in labels(out["calls"])
+    assert out["result"]["implementation_engine"] == "claude"
+
+
+def test_workflow_takes_the_higher_tier_when_the_decider_is_unsure(repo, write_config, monkeypatch, fake_openrouter):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch, balance={"mode": "off"})
+    fake_openrouter.chat_body = fake_openrouter.answer(
+        '{"route": "standard", "confidence": 0.5, "alternative": "complex", "reason": "unclear"}')
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "complex"
+    assert "decider unsure (0.5): took complex" in out["logs"]
+
+
+def test_long_task_id_is_replaced(repo):
+    out = run(repo, {"task": "fix typo in README", "args": {"task_id": "a" * 65},
+                     "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    assert out["result"]["task_id"].startswith("fix-typo-in-readme-")
+
+
+def test_workflow_uses_decider_route_and_falls_back_to_keywords(repo, write_config, monkeypatch, fake_openrouter):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch, balance={"mode": "off"})
+    fake_openrouter.chat_body = fake_openrouter.answer('{"route": "trivial", "confidence": 0.95, "reason": "tiny"}')
+    out = run(repo, {"task": "add unit tests for parser", "agents": {"implement:claude": DONE}})
+    assert out["result"]["route"] == "trivial", "the decider's route wins over the keyword standard"
+    assert "decide_route.py" in next(c for c in out["calls"] if c["label"] == "classify")["command"]
+    fake_openrouter.chat_status = 500
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "standard", "exit 3 falls back to the keyword classifier"
+    calls = len(fake_openrouter.chat_requests)
+    out = run(repo, {"task": "add unit tests for parser", "args": {"decider": False}, "agents": SCOUT_AGENTS})
+    assert out["result"]["route"] == "standard" and len(fake_openrouter.chat_requests) == calls

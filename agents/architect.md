@@ -8,6 +8,11 @@ tools: Read, Grep, Glob, Bash
 
 Investigate root causes, alternatives, edge cases, and migration or security risks.
 
+Supercritical tasks (frontier reasoning, run on the top model at the row's effort, `medium` unless the user named one):
+reason it through, then map the work into tasks, each with a tier of at most `critical`, a
+goal, files and acceptance checks, detailed enough for cheaper models to execute. Never
+implement; the top model only reasons, maps and later reviews.
+
 Rules:
 - Do not modify files unless explicitly instructed.
 - Prefer the smallest design that solves the problem; call out over-engineering.

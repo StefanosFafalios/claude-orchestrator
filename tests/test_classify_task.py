@@ -41,7 +41,6 @@ def test_security_sensitive_is_critical(task):
     result = classify(task)
     assert result["route"] == "critical"
     assert result["recommended_model"] == "opus"
-    assert result["requires_codex_review"] is True
 
 
 @pytest.mark.parametrize("task", [
@@ -59,10 +58,9 @@ def test_test_work_is_standard(task):
     assert (result["route"], result["recommended_model"], result["recommended_effort"]) == ("standard", "sonnet", "medium")
 
 
-def test_investigating_auth_is_complex_with_codex_review():
+def test_investigating_auth_is_complex():
     result = classify("debug why login fails intermittently")
     assert result["route"] == "complex"
-    assert result["requires_codex_review"] is True
 
 
 def test_many_files_is_complex():
@@ -105,7 +103,7 @@ def test_commit_ordering_is_not_a_git_action():
 
 def test_output_shape_and_determinism():
     first = classify("add unit tests for parser")
-    assert set(first) == {"route", "recommended_model", "recommended_effort", "reason", "requires_codex_review"}
+    assert set(first) == {"route", "recommended_model", "recommended_effort", "reason"}
     assert first == classify("add unit tests for parser")
 
 

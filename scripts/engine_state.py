@@ -21,7 +21,9 @@ from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PLUGIN_ROOT / "templates" / "orchestrator.config.json"
-ENGINES = ("claude", "codex")
+ENGINES = ("claude", "codex", "openrouter")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+TASK_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 STATUSES = ("healthy", "near_limit", "limited")
 MAX_ERROR_CHARS = 500
 
@@ -92,18 +94,43 @@ def _read_json(path: Path) -> dict:
 
 def load_config(root: Path | None = None) -> dict:
     """Plugin defaults overlaid by the project's ``.claude/orchestrator.config.json``."""
-    config = _read_json(DEFAULT_CONFIG_PATH)
+    import model_map  # imported here: model_map imports ConfigError from this module
+
+    # Tests point this at a frozen capability map so a re-seeded template does not break them.
+    config = _read_json(Path(os.environ.get("ORCHESTRATOR_DEFAULT_CONFIG") or DEFAULT_CONFIG_PATH))
     path = config_path(root)
+    project_raw: dict = {}
     if path.is_file():
-        config = deep_merge(config, _read_json(path))
+        project_raw = _read_json(path)
+        config = deep_merge(config, project_raw)
+    config["legacy_keys"] = model_map.legacy_keys(project_raw)
+    config.pop("defaults", None)  # legacy keys are reported above and ignored
+    config.get("codex", {}).pop("tiers", None)
+    config.get("codex", {}).pop("default_model", None)
+    model_map.validate(config)
     config.setdefault("automatic", True)
     config.setdefault("usage_sync", True)
     return config
 
 
+def default_state() -> dict:
+    state = {engine: dict(DEFAULT_ENGINE) for engine in ENGINES}
+    state["supercritical_efforts"] = {}
+    return state
+
+
+def engine_enabled(config: dict, engine: str) -> bool:
+    """Enabled in config; OpenRouter is off by default and also needs its API key in the environment."""
+    if not config.get("engines", {}).get(engine, engine != "openrouter"):
+        return False
+    if engine == "openrouter":
+        return bool(os.environ.get(config["openrouter"]["key_env"]))
+    return True
+
+
 def load_state(root: Path | None = None) -> dict:
     """Current state with defaults filled in; a corrupt file is treated as defaults."""
-    state = {engine: dict(DEFAULT_ENGINE) for engine in ENGINES}
+    state = default_state()
     path = state_path(root)
     if path.is_file():
         try:
@@ -113,6 +140,8 @@ def load_state(root: Path | None = None) -> dict:
         for engine in ENGINES:
             if isinstance(saved.get(engine), dict):
                 state[engine].update(saved[engine])
+        if isinstance(saved.get("supercritical_efforts"), dict):
+            state["supercritical_efforts"] = saved["supercritical_efforts"]
     return state
 
 
@@ -148,7 +177,7 @@ def sync_usage(state: dict, config: dict, observations: dict | None = None) -> b
         return False
     if observations is None:
         from usage_sources import observe  # Imported lazily: only syncing reads ~/.claude and ~/.codex.
-        observations = observe()
+        observations = observe(config)
     changed = False
     for engine in ENGINES:
         obs = observations.get(engine)
@@ -252,6 +281,10 @@ def build_parser() -> argparse.ArgumentParser:
     result_p.add_argument("--engine", choices=ENGINES, required=True)
     result_p.add_argument("--task-id", required=True)
     result_p.add_argument("--status", choices=("success", "failed"), required=True)
+
+    effort_p = sub.add_parser("set-effort", help="record the effort chosen for a supercritical task")
+    effort_p.add_argument("--task-id", required=True)
+    effort_p.add_argument("--effort", choices=EFFORTS, required=True)
     return parser
 
 
@@ -263,11 +296,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    if args.command == "set-effort" and not TASK_ID_RE.match(args.task_id):
+        print("error: --task-id must match [A-Za-z0-9._-]{1,64}", file=sys.stderr)
+        return 2
     if args.command == "config":
         print(json.dumps(config, indent=2))
         return 0
     if args.command == "reset":
-        state = {engine: dict(DEFAULT_ENGINE) for engine in ENGINES}
+        state = default_state()
     elif args.command in ("status", "sync"):
         print(json.dumps(load_synced_state(config), indent=2))
         return 0
@@ -279,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_mark_limit(state, args)
         elif args.command == "record-result":
             cmd_record_result(state, args)
+        elif args.command == "set-effort":
+            state["supercritical_efforts"][args.task_id] = args.effort
     if args.command != "status":
         save_state(state)
     print(json.dumps(state, indent=2))

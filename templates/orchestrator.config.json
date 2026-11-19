@@ -1,18 +1,4 @@
 {
-  "defaults": {
-    "scout_model": "haiku",
-    "scout_effort": "low",
-    "implementation_model": "sonnet",
-    "implementation_effort": "medium",
-    "architect_model": "opus",
-    "architect_effort": "high",
-    "review_model": "sonnet",
-    "review_effort": "medium",
-    "critical_review_model": "opus",
-    "critical_review_effort": "high",
-    "style_review_model": "haiku",
-    "style_review_effort": "low"
-  },
   "review": {
     "split": true
   },
@@ -38,25 +24,338 @@
   },
   "engines": {
     "claude": true,
-    "codex": true
+    "codex": true,
+    "openrouter": false
   },
   "fallback": {
     "claude_to_codex": true,
     "codex_to_claude": true,
     "require_human_review_when_both_limited": true
   },
-  "codex": {
-    "default_model": ["gpt-6.1-sol", "gpt-6-luna"],
-    "max_files_per_fallback": 5,
-    "tiers": {
-      "trivial": { "model": ["gpt-6-luna", "gpt-5.6-luna"], "effort": "low", "implement": true },
-      "standard": { "model": ["gpt-6.1-terra", "gpt-5.6-terra"], "effort": "medium", "implement": true },
-      "complex": { "model": ["gpt-6.1-sol", "gpt-6-luna"], "effort": "high", "implement": true, "implement_models": ["gpt-6.1-sol"] },
-      "critical": { "model": ["gpt-6-astra", "gpt-6-luna"], "effort": "high", "implement": false }
+  "openrouter": {
+    "key_env": "OPENROUTER_API_KEY",
+    "budget": {
+      "yearly_usd": 0,
+      "monthly_usd": 0,
+      "weekly_usd": 0,
+      "daily_usd": 0
     }
+  },
+  "codex": {
+    "max_files_per_fallback": 5
+  },
+  "decider": {
+    "min_confidence": 0.9
   },
   "balance": {
     "mode": "adaptive",
-    "routes": ["standard", "complex"]
+    "routes": [
+      "standard",
+      "complex"
+    ]
+  },
+  "models": {
+    "fable": {
+      "score": 98,
+      "engines": {
+        "claude": "claude-fable-5-2",
+        "openrouter": "anthropic/claude-fable-5.2"
+      }
+    },
+    "gpt-6.2-astra": {
+      "score": 97,
+      "engines": {
+        "codex": "gpt-6.2-astra",
+        "openrouter": "openai/gpt-6.2-astra"
+      }
+    },
+    "opus": {
+      "score": 95,
+      "engines": {
+        "claude": "opus",
+        "openrouter": "anthropic/claude-opus-5.5"
+      }
+    },
+    "gemini-4-carbon": {
+      "score": 93,
+      "engines": {
+        "openrouter": "google/gemini-4-carbon"
+      }
+    },
+    "sonnet": {
+      "score": 92,
+      "engines": {
+        "claude": "sonnet",
+        "openrouter": "anthropic/claude-sonnet-5.5"
+      }
+    },
+    "gpt-6.2-sol": {
+      "score": 90,
+      "engines": {
+        "codex": "gpt-6.2-sol",
+        "openrouter": "openai/gpt-6.2-sol"
+      }
+    },
+    "gemini-4-hydrogen": {
+      "score": 84,
+      "engines": {
+        "openrouter": "google/gemini-4-hydrogen"
+      }
+    },
+    "gpt-6.1-terra": {
+      "score": 83,
+      "engines": {
+        "codex": "gpt-6.1-terra",
+        "openrouter": "openai/gpt-6.1-terra"
+      }
+    },
+    "haiku": {
+      "score": 58,
+      "engines": {
+        "claude": "haiku",
+        "openrouter": "anthropic/claude-haiku-5.5"
+      }
+    },
+    "deepseek-v4.1-flash": {
+      "score": 56,
+      "engines": {
+        "openrouter": "deepseek/deepseek-v4.1-flash-1017"
+      }
+    },
+    "gpt-6-luna": {
+      "score": 36,
+      "engines": {
+        "codex": "gpt-6-luna",
+        "openrouter": "openai/gpt-6-luna"
+      }
+    }
+  },
+  "routing": {
+    "implementation": {
+      "trivial": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "standard": {
+        "models": [
+          "gpt-6.1-terra",
+          "gemini-4-hydrogen",
+          "gemini-4-carbon",
+          "sonnet",
+          "gpt-6.2-sol"
+        ],
+        "effort": "medium"
+      },
+      "complex": {
+        "models": [
+          "gemini-4-carbon",
+          "sonnet",
+          "gpt-6.2-sol",
+          "opus"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "opus"
+        ],
+        "effort": "high"
+      }
+    },
+    "review": {
+      "standard": {
+        "models": [
+          "gpt-6.1-terra",
+          "gemini-4-carbon",
+          "sonnet",
+          "gpt-6.2-sol",
+          "opus",
+          "gpt-6.2-astra"
+        ],
+        "effort": "medium"
+      },
+      "complex": {
+        "models": [
+          "gemini-4-carbon",
+          "sonnet",
+          "gpt-6.2-sol",
+          "opus",
+          "gpt-6.2-astra"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "gemini-4-carbon",
+          "sonnet",
+          "opus",
+          "gpt-6.2-astra"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "fable",
+          "gpt-6.2-astra"
+        ],
+        "effort": "medium"
+      }
+    },
+    "architecture": {
+      "trivial": {
+        "models": [
+          "sonnet",
+          "gpt-6.2-sol"
+        ],
+        "effort": "high"
+      },
+      "standard": {
+        "models": [
+          "sonnet",
+          "gpt-6.2-sol"
+        ],
+        "effort": "high"
+      },
+      "complex": {
+        "models": [
+          "opus",
+          "gpt-6.2-astra"
+        ],
+        "effort": "high"
+      },
+      "critical": {
+        "models": [
+          "opus",
+          "gpt-6.2-astra"
+        ],
+        "effort": "high"
+      },
+      "supercritical": {
+        "models": [
+          "fable",
+          "gpt-6.2-astra"
+        ],
+        "effort": "medium"
+      }
+    },
+    "scout": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      }
+    },
+    "style_review": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      }
+    },
+    "docs": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "complex": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "critical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      },
+      "supercritical": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku",
+          "gpt-6-luna"
+        ],
+        "effort": "low"
+      }
+    },
+    "decider": {
+      "standard": {
+        "models": [
+          "deepseek-v4.1-flash",
+          "haiku"
+        ],
+        "effort": "low"
+      }
+    }
+  },
+  "map_meta": {
+    "reviewed": "2026-11-18",
+    "log": ".claude/skills/review-models/decision-log.md"
   }
 }

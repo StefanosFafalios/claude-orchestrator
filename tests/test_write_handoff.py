@@ -46,10 +46,11 @@ def test_handoff_contains_contract_and_diff(project, write_config, capsys):
 
 
 def test_handoff_outside_git_and_bad_task_id(project):
-    rc = main(["--task-id", "t", "--objective", "x", "--task-route", "trivial", "--source-engine", "codex", "--target-engine", "claude"])
+    rc = main(["--task-id", "t", "--objective", "x", "--task-route", "supercritical", "--source-engine", "codex",
+               "--target-engine", "openrouter"])
     assert rc == 0
     text = (project / ".claude" / "orchestrator" / "handoffs" / "t.md").read_text()
-    assert "(not a git repository)" in text
+    assert "(not a git repository)" in text and "## Replacement engine\nopenrouter" in text
     assert "## Do not redo\n(none recorded)" in text
     assert main(["--task-id", "../escape", "--objective", "x", "--task-route", "trivial",
                  "--source-engine", "codex", "--target-engine", "claude"]) == 2
