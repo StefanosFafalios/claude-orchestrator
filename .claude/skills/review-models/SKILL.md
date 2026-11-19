@@ -37,6 +37,8 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
 ## 3. Fit
 
 - Set a minimum score bar per role x route.
+- Add type rows only with per-type benchmark evidence, ordered cheapest-sufficient first
+  and subject to the same reviewer coverage rule as tier rows; no evidence, no row.
 - List every model clearing the bar. Order every row cheapest-first by blended OpenRouter
   price; on a tie, the higher score goes first. Review rows can stay cheapest-first because
   the router keeps quality: it takes the first reviewer that scores at least the

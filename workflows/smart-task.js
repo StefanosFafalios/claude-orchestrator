@@ -47,10 +47,6 @@ const TASK_ID = SAFE_ID.test(String(ARGS.task_id || '')) ? ARGS.task_id : `${slu
 const RUN = `.claude/orchestrator/runs/${TASK_ID}`
 const PARENT = String(ARGS.parent_task_id || '')
 if (PARENT && !/^[A-Za-z0-9._-]{1,64}$/.test(PARENT)) throw new Error(`invalid args.parent_task_id: ${JSON.stringify(PARENT)}`)
-// The workflow never asks questions, so every route is headless; for opt-in `ask` rows, auto mode lets the router inherit a parent's effort.
-const ROUTE_FLAGS = ` --task-id ${q(TASK_ID)} --headless --permission-mode ${q(ARGS.permission_mode || 'default')}` +
-  (PARENT ? ` --parent-task-id ${q(PARENT)}` : '')
-
 // Newline-joined so heredoc delimiters stay alone on their lines; any failure aborts.
 const script = lines => ['set -e', ...lines].join('\n')
 
@@ -212,6 +208,11 @@ if (classification.ask === true && ROUTES.includes(classification.alternative)) 
   log(`decider unsure (${classification.confidence}): took ${ROUTE}`)
 }
 log(`${TASK_ID}: ${ROUTE} (${classification.reason})`)
+
+// The workflow never asks questions, so every route is headless; for opt-in `ask` rows, auto mode lets the router inherit a parent's effort.
+const TYPE = String(classification.type || '')
+const ROUTE_FLAGS = ` --task-id ${q(TASK_ID)} --headless --permission-mode ${q(ARGS.permission_mode || 'default')}` +
+  (PARENT ? ` --parent-task-id ${q(PARENT)}` : '') + (TYPE ? ` --task-type ${q(TYPE)}` : '')
 
 phase('Route')
 const routeCmd = (role, extra = '') => `${PY('route_engine.py')} --role ${role} --task-route ${ROUTE}${ROUTE_FLAGS}${extra}`

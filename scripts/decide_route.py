@@ -22,14 +22,15 @@ import urllib.request
 import openrouter_budget as ob
 from classify_task import FLOOR_ROUTES, RUBRIC, classify
 from engine_state import effective_status, engine_enabled, load_config, load_synced_state, redact
-from model_map import ROUTES
+from model_map import ROUTES, task_type
 from route_engine import route
 
 TIMEOUT = 8
 MAX_PROMPT_CHARS = 8000
 INSTRUCTIONS = (f"Classify the coding task in the user message into one tier. {RUBRIC} "
                 'Reply with JSON only: {"route": "<tier>", "confidence": <0..1>, '
-                '"alternative": "<next most likely tier>", "reason": "<at most 20 words>"}.')
+                '"alternative": "<next most likely tier>", "type": "<frontend|debug|refactor|tests|docs or general>", '
+                '"reason": "<at most 20 words>"}.')
 
 
 class Fallback(Exception):
@@ -109,8 +110,12 @@ def decide(prompt: str, config: dict, state: dict) -> dict:
             floor["route"] in FLOOR_ROUTES and ROUTES.index(alternative) < ROUTES.index(floor["route"]))):
         alternative = None
     ask = alternative is not None and confidence < config.get("decider", {}).get("min_confidence", 0.9)
-    return {"route": decided, "reason": reason, "model": picked["model"],
-            "confidence": confidence, "alternative": alternative, "ask": ask}
+    result = {"route": decided, "reason": reason, "model": picked["model"],
+              "confidence": confidence, "alternative": alternative, "ask": ask}
+    detected_type = task_type(answer.get("type"))
+    if detected_type is not None:
+        result["type"] = detected_type
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

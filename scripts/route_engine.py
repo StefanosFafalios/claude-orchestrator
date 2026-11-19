@@ -92,6 +92,15 @@ def _select(engines: Engines, model_ids: list[str], task_key: str | None = None,
     if healthy:
         if (split and task_key and balance.get("mode", "adaptive") == "adaptive" and len(healthy) >= 2
                 and route_name in balance.get("routes", DEFAULT_BALANCED)):
+            if "openrouter" in healthy:
+                served_elsewhere = {m for m in model_ids for e in healthy if e != "openrouter"
+                                    and model_map.engine_name(config, m, e)}
+                candidate = next((m for m in model_ids if m not in served_elsewhere
+                                  and model_map.engine_name(config, m, "openrouter")), None)
+                if candidate:
+                    candidates["openrouter"] = candidate
+                else:
+                    healthy.remove("openrouter")
             engine, reason = _pick_weighted(engines, healthy, task_key)
         else:
             engine = min(healthy, key=lambda e: model_ids.index(candidates[e]))
@@ -144,13 +153,13 @@ def _need_human(result: dict, human: bool) -> dict:
 
 def route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
           implementation_model: str | list | None = None, exclude: tuple = (), parent_task_id: str | None = None,
-          permission_mode: str | None = None, headless: bool = False) -> dict:
+          permission_mode: str | None = None, headless: bool = False, task_type: str | None = None) -> dict:
     """``implementation_model`` is one model or every model that wrote code (a fix escalation adds
     one); ``"auto"`` derives the implementer from ``task_key``."""
     if (role, task_route) in model_map.UNUSED:
         return _none(f"trivial tasks get no {role.replace('_', ' ')}", human=False)
     engines = Engines(config, state)
-    entry = dict(model_map.row(config, role, task_route))
+    entry = dict(model_map.row(config, role, task_route, task_type))
     human = False
     per_model = entry.get("model_effort", {})
     if entry["effort"] == "ask":
@@ -166,7 +175,7 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
         return _result(config, _select(engines, models, task_key, True, tuple(exclude), task_route), entry["effort"], per_model)
     if role == "review":
         writers = [implementation_model] if isinstance(implementation_model, str) else list(implementation_model or [])
-        writers = [route("implementation", task_route, config, state, task_key)["canonical_model"] if w == "auto" else w
+        writers = [route("implementation", task_route, config, state, task_key, task_type=task_type)["canonical_model"] if w == "auto" else w
                    for w in writers]
         impl_ids = {m for m in (_implementer(config, w) for w in writers if w) if m}
         others = [m for m in models if m not in impl_ids]
@@ -203,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--parent-task-id", help="parent task id (supercritical effort)")
     parser.add_argument("--permission-mode", help="permission mode of the session (supercritical effort)")
     parser.add_argument("--headless", action="store_true", help="no human available to answer questions")
+    parser.add_argument("--task-type", help="optional type (frontend, debug, refactor, tests, docs); others are ignored")
     args = parser.parse_args(argv)
     try:
         config = load_config()
@@ -211,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     result = route(args.role, args.task_route, config, load_synced_state(config), args.task_id,
                    args.implementation_model, tuple(args.exclude_engine), args.parent_task_id,
-                   args.permission_mode, args.headless)
+                   args.permission_mode, args.headless, model_map.task_type(args.task_type))
     print(json.dumps(result, indent=2))
     return 0
 

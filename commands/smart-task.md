@@ -21,6 +21,7 @@ Steps:
    ask the user first (AskUserQuestion: its `route` recommended, then `alternative`, with
    reason and confidence) and pass the chosen route; when you cannot ask, take the higher. (Callers that pass no
    `classification` get the workflow's own decider, then the keyword classifier.)
+   When the hook asks for a task type, pass it as `type` in `classification` when clearly applicable; without `type` the tier rows apply.
 3. Check engine state: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status`.
    If it exits 2 (invalid config), report the error and stop.
 4. Run the workflow. Call it by name; if the tool does not know the name, pass
