@@ -67,6 +67,25 @@ def test_min_confidence_comes_from_config(project, write_config, monkeypatch, fa
     assert json.loads(decide(project, "add a button")[1])["ask"] is False
 
 
+@pytest.mark.parametrize("reported, expected", [
+    ("Frontend", "frontend"),
+    (" tests ", "tests"),
+    ("cooking", None),
+    (None, None),
+    (5, None),  # non-string model output is ignored, not a decider failure
+    (["frontend"], None),
+])
+def test_decider_returns_only_valid_normalized_task_types(project, write_config, monkeypatch, fake_openrouter,
+                                                          reported, expected):
+    enable_decider(write_config, monkeypatch)
+    answer_with(fake_openrouter, type=reported)
+    result = json.loads(decide(project, "add a button")[1])
+    if expected is None:
+        assert "type" not in result
+    else:
+        assert result["type"] == expected
+
+
 @pytest.mark.parametrize("value", [0, 1.5, "x", True, -1])
 def test_invalid_min_confidence_is_an_invalid_config(write_config, monkeypatch, value):
     enable_decider(write_config, monkeypatch, decider={"min_confidence": value})

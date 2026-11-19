@@ -93,7 +93,7 @@ def validate(config: dict) -> None:
 
 def task_type(value: str | None) -> str | None:
     """Normalized task type, or None when absent, ``general`` or unknown (the tier row applies)."""
-    value = (value or "").strip().lower()
+    value = value.strip().lower() if isinstance(value, str) else ""  # model output may be any JSON
     return value if value in TASK_TYPES else None
 
 

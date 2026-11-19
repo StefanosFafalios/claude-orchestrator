@@ -126,6 +126,24 @@ def test_directive_rows_rubric_and_floor(project, write_config):
     assert "pytest -q" in text and "Visibility:" in text
 
 
+def test_directive_shows_only_different_type_rows(project, write_config):
+    default = context(project, "add a button")
+    assert "Types (only if clearly one)" not in default and "/frontend:" not in default
+    write_config({"routing": {"implementation": {"complex": {"types": {"frontend": {
+        "models": ["sonnet"], "effort": "high"}}}}}})
+    typed = context(project, "add a button")
+    assert typed.count("Types (only if clearly one): frontend, debug, refactor, tests, docs:") == 1
+    lines = typed.splitlines()
+    tier = next(line for line in lines if line.startswith("complex:"))
+    frontend = next(line for line in lines if line.startswith("complex/frontend:"))
+    assert "implement=implementer/sonnet/high" in frontend
+    # Only entries that differ from the tier row are listed (a new writer may change the reviewer).
+    tier_entries = set(tier.split(": ", 1)[1].rstrip(".").split("; "))
+    for entry in frontend.split(": ", 1)[1].rstrip(".").split("; "):
+        assert entry not in tier_entries
+    assert "style=" not in frontend and "docs=" not in frontend
+
+
 def test_questions_skip_routing(project):
     for prompt in ("Explain the architecture", "How does the router pick an engine?"):
         text = context(project, prompt)
