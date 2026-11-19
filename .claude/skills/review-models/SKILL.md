@@ -74,13 +74,18 @@ for the owner's approval before touching any file.
 1. Edit `templates/orchestrator.config.json`, including `map_meta.reviewed` (today's date).
 2. Bump `version` in `.claude-plugin/plugin.json`. (A seed done in the same release as another
    bump does not bump twice.)
-3. Smoke-test each new OpenRouter slug:
-   `OPENROUTER_MODEL=<slug> OPENROUTER_SANDBOX=read-only python3 scripts/openrouter_run.py <task-file>`, where the task file asks the model to list
-   one file.
+3. Check every OpenRouter slug for free: it must appear in `catalog.py` output (the slug
+   exists and lists `tools`); drop or fix any that does not. No model call, no spend.
+4. Paid smoke test, only when needed: a slug from a provider no mapped model has passed yet,
+   or a slug that failed in real use. Run the cheapest such slug of that provider (a pass
+   covers the provider's path for its pricier models):
+   `OPENROUTER_MODEL=<slug> OPENROUTER_SANDBOX=read-only python3 scripts/openrouter_run.py <task-file>`,
+   where the task file asks the model to list one file. Never `fable` (the top-priced model).
+   Plugin plumbing tests never need a mapped model: use a `:free` slug or the cheapest one,
+   with a throwaway task (free providers may log prompts; never send project code).
    This spends real money with the owner's key: get explicit owner approval first, and never
-   print or store the key. Drop models that fail tool calls. Test only new or changed slugs,
-   and never `fable` (the top-priced model): its provider's next model (`opus`) covers the
-   same tool-call path. The 2026-11-19 run of all 11 slugs cost $1.19.
-4. Append a dated entry to `.claude/skills/review-models/decision-log.md`: what changed,
+   print or store the key. Drop models that fail tool calls. The 2026-11-19 run of all
+   11 slugs cost $1.19; providers anthropic, openai, google and deepseek have passed.
+5. Append a dated entry to `.claude/skills/review-models/decision-log.md`: what changed,
    evidence links, and the spend of the smoke tests.
-5. Run `python3 -m pytest -q && ruff check .`.
+6. Run `python3 -m pytest -q && ruff check .`.
