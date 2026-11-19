@@ -37,8 +37,36 @@ def test_report_lists_sources_and_cost(enabled, fake_openrouter, tmp_path, capsy
     assert out.startswith("Python 3.14 shipped") and out.rstrip().endswith("Cost: $0.0123")
     assert out.count("https://a.example/x") == 1 and "Sources:\n- https://b.example/y" in out
     request = json.loads(fake_openrouter.chat_requests[0]["body"])
-    assert request["model"] == "perplexity/sonar" and request["reasoning"] == {"effort": "low"}
+    assert request["model"] == "perplexity/sonar" and "reasoning" not in request
     assert "sources" in request["messages"][0]["content"].lower()
+
+
+def test_malformed_or_non_web_citations_are_skipped(enabled, fake_openrouter, tmp_path, capsys):
+    fake_openrouter.chat_body = {"choices": [{"message": {"content": "report", "annotations": [
+        "junk", {"type": "url_citation"}, {"type": "url_citation", "url_citation": None},
+        {"type": "url_citation", "url_citation": {"url": "javascript:alert(1)"}},
+        {"type": "url_citation", "url_citation": {"url": "https://ok.example/z"}}]}}],
+        "citations": [None, 7, "ftp://x.example", "http://h.example"]}
+    code, out, err = run(tmp_path, capsys)
+    assert code == 0, err
+    assert out.startswith("report") and "- https://ok.example/z" in out and "- http://h.example" in out
+    assert "javascript" not in out and "ftp" not in out
+
+
+def test_reasoning_only_for_reasoning_models_and_timeout_per_model(enabled, fake_openrouter, tmp_path, capsys,
+                                                                    monkeypatch):
+    seen = []
+    real = research_run.urllib.request.urlopen
+    monkeypatch.setattr(research_run.urllib.request, "urlopen",
+                        lambda request, timeout: seen.append(timeout) or real(request, timeout=timeout))
+    path = tmp_path / "q.txt"
+    path.write_text("q")
+    for model in ("perplexity/sonar", "perplexity/sonar-reasoning-pro", "perplexity/sonar-deep-research"):
+        assert research_run.main(["--query-file", str(path), "--model", model, "--effort", "low"]) == 0
+    sent = [json.loads(r["body"]) for r in fake_openrouter.chat_requests]
+    assert ["reasoning" in b for b in sent] == [False, True, True]
+    assert seen == [research_run.TIMEOUT, research_run.TIMEOUT, research_run.DEEP_TIMEOUT]
+    assert research_run.DEEP_TIMEOUT > research_run.TIMEOUT
 
 
 def test_no_citations_means_no_sources_or_cost(enabled, fake_openrouter, tmp_path, capsys):
@@ -66,10 +94,12 @@ def test_http_errors(enabled, fake_openrouter, tmp_path, capsys, status, code):
     assert (got, out) == (code, "") and str(status) in err and KEY not in err
 
 
-def test_key_limit_exits_42(enabled, fake_openrouter, tmp_path, capsys):
+@pytest.mark.parametrize("message, code", [("Key limit exceeded", 42), ("limit exceeded for this key", 42),
+                                           ("Rate limit policy applies", 1)])
+def test_403_is_a_usage_limit_only_for_key_limits(enabled, fake_openrouter, tmp_path, capsys, message, code):
     fake_openrouter.chat_status = 403
-    fake_openrouter.chat_body = {"error": {"message": "Key limit exceeded"}}
-    assert run(tmp_path, capsys)[0] == 42
+    fake_openrouter.chat_body = {"error": {"message": message}}
+    assert run(tmp_path, capsys)[0] == code
 
 
 @pytest.mark.parametrize("body", ["not json", {"choices": []}, {"choices": [{"message": {"content": " "}}]}])

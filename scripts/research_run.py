@@ -24,6 +24,7 @@ import openrouter_budget as ob
 from engine_state import EFFORTS, ConfigError, effective_status, engine_enabled, load_config, load_synced_state, redact
 
 TIMEOUT = 120
+DEEP_TIMEOUT = 600  # deep-research models search for minutes
 MAX_QUERY_CHARS = 2000
 INSTRUCTIONS = ("Answer the question with concise findings. Cite a source and its date for every claim. "
                 "Do not speculate: say plainly when sources do not settle the question.")
@@ -52,24 +53,28 @@ def research(query: str, model: str, effort: str | None, config: dict, state: di
     body = {"model": model,
             "messages": [{"role": "system", "content": INSTRUCTIONS},
                          {"role": "user", "content": redact(query)[:MAX_QUERY_CHARS]}]}  # redact first: a cut token would slip past
-    if effort:
+    if effort and ("reasoning" in model or "deep-research" in model):  # plain search models take no such field
         body["reasoning"] = {"effort": effort}
     request = urllib.request.Request(ob.api_base() + "/chat/completions", data=json.dumps(body).encode("utf-8"),
                                      headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=DEEP_TIMEOUT if "deep-research" in model else TIMEOUT) as response:
             answer = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = redact(exc.read().decode("utf-8", "replace"))[:200]
-        limited = exc.code == 402 or (exc.code == 403 and "limit" in detail.lower())
+        limited = exc.code == 402 or (exc.code == 403 and any(
+            phrase in detail.lower() for phrase in ("key limit", "limit exceeded")))
         raise Failure(f"OpenRouter answered {exc.code}: {detail}", 42 if limited else 1) from exc
     message = answer["choices"][0]["message"]
     report = (message.get("content") or "").strip()
     if not report:
         raise Failure("OpenRouter returned an empty report")
-    urls = list(answer.get("citations") or [])
-    urls += [a["url_citation"]["url"] for a in message.get("annotations") or [] if a.get("type") == "url_citation"]
-    urls = list(dict.fromkeys(u for u in urls if isinstance(u, str)))
+    found = list(answer.get("citations") or [])
+    for note in message.get("annotations") or []:
+        if isinstance(note, dict) and note.get("type") == "url_citation":
+            found.append((note.get("url_citation") or {}).get("url"))
+    # Citations are untrusted: skip anything malformed or not a web URL, never lose the report.
+    urls = list(dict.fromkeys(u for u in found if isinstance(u, str) and u.startswith(("http://", "https://"))))
     if urls:
         report += "\n\nSources:\n" + "\n".join(f"- {u}" for u in urls)
     cost = (answer.get("usage") or {}).get("cost")
