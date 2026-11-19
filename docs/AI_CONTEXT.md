@@ -34,7 +34,9 @@ project's `.claude/orchestrator.config.json`.
 
 `scripts/engine_state.py` owns config loading, state I/O and secret redaction; the
 other scripts and hooks import from it rather than re-implementing them.
-`scripts/model_map.py` resolves the model-centric capability map (`models`, `routing`).
+`scripts/model_map.py` resolves the model-centric capability map (`models`, `routing`),
+including optional task-type sub-rows. The adaptive split prefers a healthy home engine
+over OpenRouter for the same canonical model.
 `scripts/openrouter_budget.py` derives spend caps and owns the OpenRouter key/model caches;
 `scripts/openrouter_run.py` runs OpenRouter models through Codex and supervises spend.
 `scripts/decide_route.py` is the cheap tier decider: one direct OpenRouter call on the

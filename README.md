@@ -201,10 +201,12 @@ Each routing row lists models in preference order (always a list, even for one m
 each engine uses the first one it can serve (for Codex, from its local model cache; for
 OpenRouter, from the cached `/models` list). A row may add `"model_effort": {"<model>": "<effort>"}`
 to give a listed model its own effort instead of the row's.
+Optional type sub-rows route clear `frontend`, `debug`, `refactor`, `tests` or `docs` work; unknown types use the tier row.
 
 **Adaptive split.** When several engines are healthy, standard and complex tasks are
 shared in proportion to each engine's headroom (remaining quota above the near-limit
-line). For example, Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
+line), with a healthy home engine preferred over OpenRouter for the same model. For example,
+Claude at 90% and Codex at 45% gives Codex about 24% of tasks. As
 one engine gets closer to its limit, more work goes to the others. The choice is a
 deterministic hash of the prompt and session, so the same prompt in a session routes the same way.
 

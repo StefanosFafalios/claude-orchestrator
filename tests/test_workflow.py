@@ -50,6 +50,47 @@ def state(project):
     return json.loads((project / ".claude" / "engine-state.json").read_text())
 
 
+def route_commands(out):
+    return [line for call in out["calls"] if call["kind"] == "bash"
+            for line in call["command"].splitlines() if "route_engine.py" in line]
+
+
+@pytest.mark.parametrize("task_type, flag", [
+    ("frontend", "--task-type 'frontend'"),
+    (None, None),
+    ("front'end; $(touch injected)", "--task-type 'front'\\''end; $(touch injected)'"),
+])
+def test_classification_type_passed_to_every_route(repo, write_config, task_type, flag):
+    write_config({"balance": {"mode": "off"}})
+    classification = {"route": "complex", "reason": "test"}
+    if task_type is not None:
+        classification["type"] = task_type
+    agents = dict(SCOUT_AGENTS, plan=PLAN)
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": classification}, "agents": agents})
+    commands = route_commands(out)
+    assert len(commands) >= 5
+    assert all((flag in command if flag else "--task-type" not in command) for command in commands)
+    assert not (repo / "injected").exists()
+
+
+def test_decider_type_passed_to_routes(repo, write_config, monkeypatch, fake_openrouter):
+    from test_decide_route import enable_decider
+    enable_decider(write_config, monkeypatch, balance={"mode": "off"})
+    fake_openrouter.chat_body = fake_openrouter.answer(
+        '{"route": "standard", "type": "tests", "confidence": 0.95, "reason": "tests"}')
+    out = run(repo, {"task": "add unit tests for parser", "agents": SCOUT_AGENTS})
+    commands = route_commands(out)
+    assert len(commands) >= 5 and all("--task-type 'tests'" in command for command in commands)
+
+
+def test_classification_type_selects_workflow_row(repo, write_config):
+    write_config({"balance": {"mode": "off"}, "routing": {"implementation": {"complex": {
+        "types": {"frontend": {"models": ["haiku"], "effort": "low"}}}}}})
+    out = run(repo, {"task": "update a screen", "args": {"classification": {
+        "route": "complex", "type": "frontend", "reason": "test"}}, "agents": dict(SCOUT_AGENTS, plan=PLAN)})
+    assert out["result"]["implementation_model"] == "haiku"
+
+
 def test_review_uses_capability_not_engine(repo, write_config):
     write_config({"balance": {"mode": "off"}})
     out = run(repo, {"task": "add unit tests for parser", "agents": {

@@ -33,13 +33,17 @@ Workflow:
    conversation, never lower; approvals keep the approved tier; on exit 3 classify yourself.
    If it prints `"ask": true` (confidence below `decider.min_confidence`, default 0.9), ask
    the user to pick its `route` or `alternative`; when you cannot ask, take the higher.
+   When the hook shows type rows, state `route=<tier>/<type>` for a clear type and pass
+   `--task-type <type>` on routing calls; an unknown type uses the tier row and the reviewer
+   capability and different-model rules still apply.
 3. Check engine state:
    python3 "<scripts>/engine_state.py" status
 4. Choose engine, model, and effort:
    python3 "<scripts>/route_engine.py" --role implementation --task-route <route> --task-id <task-id>
    The router is model-centric: each route lists ranked models from the capability map, and
    the task id enables the adaptive split, so healthy engines (claude, codex, openrouter)
-   share standard and complex work in proportion to their headroom. `engine: codex` or
+   share standard and complex work in proportion to their headroom, preferring a healthy
+   home engine over OpenRouter for the same model. `engine: codex` or
    `engine: openrouter` is a normal outcome, not only a fallback. Delegate it.
    Any script exiting 2 means invalid configuration: report the error and stop.
 5. Use the selected Claude model and effort for normal work. Trivial tasks: do them
