@@ -38,9 +38,13 @@ def review(request: str, model: str, effort: str | None, config: dict, state: di
     if effort:
         body["reasoning"] = {"effort": effort}
     answer = chat(body, config, state, DEEP_TIMEOUT)  # a long diff at high effort takes minutes
-    findings = (answer["choices"][0]["message"].get("content") or "").strip()
+    choice = answer["choices"][0]
+    findings = (choice["message"].get("content") or "").strip()
     if not findings:
-        raise Failure("OpenRouter returned an empty review")
+        raise Failure("OpenRouter returned an empty review (reasoning may have used up max_tokens)")
+    if choice.get("finish_reason") == "length":  # never pass a cut-off list as the whole review
+        findings += ("\n\n- high review_run: TRUNCATED at max_tokens; later findings are missing. "
+                     "Re-run at lower effort or split the diff.")
     return findings + cost_line(answer)
 
 

@@ -24,8 +24,10 @@ Send only:
 Steps:
 1. Write the review request to `.claude/orchestrator/runs/<task-id>.review.md` in the project
    (or the path the prompt gives). For `review_run.py`, append the diff with Bash, never by reading
-   it yourself: `git diff -U10 HEAD >> <request>`, plus `git diff --no-index /dev/null <file>` for
-   each new untracked file. Over the size limit (exit 1, "split the diff"): report it; do not trim.
+   it yourself: `git diff -U10 HEAD -- . ':(exclude)<p>' >> <request>` with one exclude per
+   `paths.exclude` entry in `.claude/orchestrator.config.json` (lockfiles and generated files
+   too), plus `git diff --no-index /dev/null <file> >> <request> || true` for each new untracked
+   file (it exits 1 on success). Over the size limit (exit 1, "split the diff"): report it; do not trim.
 2. Run exactly the command the prompt gives (read-only sandbox, model as named), passing that file.
    Never switch to the other wrapper.
 3. Exit 42 (usage limit): run `python3 "<scripts>/engine_state.py" mark-limit --engine <engine> --message "<first line>"`
@@ -52,7 +54,7 @@ Do not ask it to implement unless explicitly requested.
 Your reply goes to the orchestrating model, not the user, and it pays for every word on each
 later turn. Write it dense: no greetings, restated task, narration or reasoning. Use:
 STATUS: done | partial | blocked | failed
-RESULT: the outcome, with the fields this file asks for
+RESULT: the outcome, with the fields or JSON this file asks for
 EVIDENCE: only paths, ids, key values, failing tests
 NEXT: next action, or none
 BLOCKERS: only if any

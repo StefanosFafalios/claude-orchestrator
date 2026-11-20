@@ -65,3 +65,9 @@ def test_bad_usage_exits_2(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("OPENROUTER_MODEL", "m")
     monkeypatch.setenv("OPENROUTER_EFFORT", "turbo")
     assert run(tmp_path, capsys)[0] == 2
+
+
+def test_truncated_review_is_flagged(enabled, fake_openrouter, tmp_path, capsys):
+    fake_openrouter.chat_body = {"choices": [{"message": {"content": "- low a.py:1 ..."}, "finish_reason": "length"}]}
+    code, out, _ = run(tmp_path, capsys)
+    assert code == 0 and "TRUNCATED" in out

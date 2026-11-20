@@ -196,7 +196,8 @@ def test_run_over_its_allowance_pauses_and_resume_grants_one_more(project, tmp_p
     assert proc.returncode == 43
     run_id = out.split("OPENROUTER_PAUSED ")[1].strip()
     paused = json.loads((project / ".claude" / "orchestrator" / "openrouter-runs" / run_id / "paused.json").read_text())
-    assert (paused["window"], paused["base_usage"]) == ("run", 10.0)
+    assert (paused["window"], paused["base_usage"], paused["cap"]) == ("run", 10.0, 1)
+    assert abs(paused["spend"] - 1.2) < 1e-9
     resumed = start(tmp_path, env, "--resume", run_id)
     time.sleep(0.6)
     fake_openrouter.key_data["usage"] = 12.1  # past the second allowance: pauses again
@@ -217,8 +218,8 @@ def test_zero_allowance_never_pauses(project, tmp_path, env, fake_openrouter):
 
 FAKE_CLAUDE = """#!/bin/sh
 echo "$@" > "$FAKE_DIR/claude-args"
-printf '%s|%s|%s' "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL" "${ANTHROPIC_AUTH_TOKEN-unset}" > "$FAKE_DIR/claude-env"
-printf 'final answer'
+printf '%s|%s|%s|%s' "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL" "${ANTHROPIC_AUTH_TOKEN-unset}" "${OPENROUTER_API_KEY-unset}" > "$FAKE_DIR/claude-env"
+printf 'final answer %s' "${FAKE_ECHO:-}"
 """
 
 
@@ -233,18 +234,30 @@ def claude_env(env, tmp_path):
 def test_anthropic_models_run_through_bare_claude_code(tmp_path, claude_env):
     # Claude Code marks prompt-cache breakpoints that Codex's requests lack; --bare never bills the subscription.
     code, out, _ = run(tmp_path, claude_env, OPENROUTER_EFFORT="medium", OPENROUTER_LAST_MESSAGE=str(tmp_path / "last.md"))
-    assert (code, out) == (0, "final answer")
+    assert (code, out) == (0, "final answer ")
     assert not (tmp_path / "args").exists(), "codex must not run"
     args = (tmp_path / "claude-args").read_text()
-    assert args.startswith("-p --bare --no-session-persistence --model anthropic/claude-haiku-5.5")
-    assert "--tools=Read,Grep,Glob,Bash --allowedTools=Bash(git diff:*)" in args and "acceptEdits" not in args
+    assert "--no-session-persistence --model anthropic/claude-haiku-5.5" in args
+    assert "-p --bare --restricted --strict-mcp-config" in args
+    assert "--tools=Read,Grep,Glob --effort" in args and "Bash" not in args and "acceptEdits" not in args
     assert "--effort=medium -- do the thing" in args and KEY not in args
-    key, base, token = (tmp_path / "claude-env").read_text().split("|")
-    assert (key, base, token) == (KEY, ob.api_base()[:-3] if ob.api_base().endswith("/v1") else ob.api_base(), "unset")
-    assert (tmp_path / "last.md").read_text() == "final answer"
+    key, base, token, or_key = (tmp_path / "claude-env").read_text().split("|")
+    assert (key, base, token, or_key) == (KEY, ob.api_base()[:-3] if ob.api_base().endswith("/v1") else ob.api_base(), "unset", "unset")
+    assert (tmp_path / "last.md").read_text() == "final answer "
 
 
-def test_claude_code_write_runs_accept_edits(tmp_path, claude_env):
+def test_claude_code_write_runs_bash_only_in_its_sandbox(tmp_path, claude_env, monkeypatch):
+    import openrouter_run
     run(tmp_path, claude_env, OPENROUTER_SANDBOX="workspace-write")
     args = (tmp_path / "claude-args").read_text()
-    assert "--tools=Read,Grep,Glob,Edit,Write,Bash --allowedTools=Bash --permission-mode=acceptEdits" in args
+    if openrouter_run.sandbox_available():
+        assert "--tools=Read,Grep,Glob,Edit,Write,Bash --allowedTools=Bash --permission-mode=acceptEdits" in args
+        assert '"allowUnsandboxedCommands": false' in args
+    monkeypatch.setattr(openrouter_run, "sandbox_available", lambda: False)
+    cmd = openrouter_run.claude_command("anthropic/x", "", "workspace-write", "p")
+    assert "--tools=Read,Grep,Glob,Edit,Write" in cmd and not any("Bash" in a for a in cmd)
+
+
+def test_claude_code_output_is_redacted(tmp_path, claude_env):
+    code, out, _ = run(tmp_path, claude_env, FAKE_ECHO=KEY, OPENROUTER_LAST_MESSAGE=str(tmp_path / "last.md"))
+    assert code == 0 and KEY not in out and KEY not in (tmp_path / "last.md").read_text()

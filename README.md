@@ -330,8 +330,11 @@ resuming grants one more), even without a monthly budget, and Codex compacts its
 64k tokens with tool outputs capped at 6k, because every agent step resends the whole context.
 Anthropic models (`anthropic/*`, e.g. Fable) run through headless Claude Code (`claude -p --bare`)
 instead of Codex: it marks prompt-cache breakpoints, so each step reads its context from cache, and
-`--bare` authenticates only with the OpenRouter key, never your Claude subscription. Read-only runs
-get read tools plus read-only git commands. OpenRouter reviews skip the agent loop: `scripts/review_run.py` sends the request (task plus
+`--bare` authenticates only with the OpenRouter key, never your Claude subscription. `--restricted`
+ignores settings files, so no allow rule widens the run. Read-only runs get only Read/Grep/Glob;
+write runs get Bash only inside Claude Code's sandbox (no network, confined writes) and no Bash where
+that sandbox cannot start (for example inside an already sandboxed shell). The per-run $1 allowance
+applies to existing setups too: a long Fable run asks before each further dollar. OpenRouter reviews skip the agent loop: `scripts/review_run.py` sends the request (task plus
 diff with context) in one call and refuses requests over about 100k tokens. Agents report in a
 short `STATUS/RESULT/EVIDENCE/NEXT` format, since their replies become the session's input.
 

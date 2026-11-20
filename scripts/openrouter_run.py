@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -82,31 +83,61 @@ def build_command(config: dict, prompt: str) -> list:
     return cmd + [prompt]
 
 
+SANDBOX_SETTINGS = json.dumps({"sandbox": {"enabled": True, "allowUnsandboxedCommands": False}})
+
+
+def sandbox_available() -> bool:
+    """Claude Code sandboxes Bash with Seatbelt on macOS and bubblewrap on Linux.
+
+    Its Linux sandbox nests a user namespace, which fails when the caller is already sandboxed
+    (e.g. a Claude Code session's own Bash), so probe exactly that instead of trusting ``bwrap``.
+    """
+    if sys.platform == "darwin":
+        return True
+    if not (shutil.which("bwrap") and shutil.which("unshare")):
+        return False
+    probe = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-user", "--unshare-pid", "--proc", "/proc",
+             "--", "unshare", "-U", "-r", "true"]
+    try:
+        return subprocess.run(probe, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def claude_command(model: str, effort: str, sandbox: str, prompt: str) -> list:
     """Anthropic models run through headless Claude Code: it marks prompt-cache breakpoints, which
     Codex's OpenAI-style requests do not, so each agent step reads its context from cache.
 
-    ``--bare`` skips hooks, plugins and CLAUDE.md discovery and authenticates only with
-    ANTHROPIC_API_KEY (set in ``start``), so the run can never bill the Claude subscription.
-    Claude Code has no OS sandbox: read-only runs get read tools plus read-only git commands.
+    ``--bare`` skips hooks, plugins and CLAUDE.md and authenticates only with ANTHROPIC_API_KEY (set
+    in ``child_env``), so the run never bills the Claude subscription; ``--restricted`` ignores
+    settings files (a project's or user's allow rules cannot widen the scope) and keeps file tools in
+    the working directory. Read-only runs get no command tool at all; write runs get Bash only inside
+    Claude Code's sandbox (no network, writes confined), and none where the sandbox cannot run.
     """
-    cmd = [os.environ.get("CLAUDE_BIN") or "claude", "-p", "--bare", "--no-session-persistence", "--model", model]
+    cmd = [os.environ.get("CLAUDE_BIN") or "claude", "-p", "--bare", "--restricted", "--strict-mcp-config",
+           "--no-session-persistence", "--model", model]
     if sandbox == "read-only":
-        cmd += ["--tools=Read,Grep,Glob,Bash", "--allowedTools=" + ",".join(
-            f"Bash(git {sub}:*)" for sub in ("diff", "log", "show", "status"))]
+        cmd += ["--tools=Read,Grep,Glob"]
+    elif sandbox_available():
+        cmd += ["--tools=Read,Grep,Glob,Edit,Write,Bash", "--allowedTools=Bash", "--permission-mode=acceptEdits",
+                f"--settings={SANDBOX_SETTINGS}"]
     else:
-        cmd += ["--tools=Read,Grep,Glob,Edit,Write,Bash", "--allowedTools=Bash", "--permission-mode=acceptEdits"]
+        cmd += ["--tools=Read,Grep,Glob,Edit,Write", "--permission-mode=acceptEdits"]
     if effort:
         cmd += [f"--effort={effort}"]
     return cmd + ["--", prompt]
 
 
-def child_env(cmd: list, key: str) -> dict:
-    """Claude Code reaches OpenRouter through its Anthropic-compatible API; the key stays out of argv."""
+def child_env(cmd: list, key: str, key_env: str) -> dict:
+    """Claude Code reaches OpenRouter through its Anthropic-compatible API; the key stays out of argv,
+    and only the variable Claude Code itself reads carries it (Codex needs ``key_env`` instead)."""
     env = dict(os.environ)
     if "--bare" in cmd:
+        for name in (key_env, "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                     "CLAUDE_CODE_USE_FOUNDRY"):  # a cloud provider would bill its own account instead
+            env.pop(name, None)
         env.update(ANTHROPIC_BASE_URL=re.sub(r"/v1$", "", ob.api_base()), ANTHROPIC_API_KEY=key)
-        env.pop("ANTHROPIC_AUTH_TOKEN", None)
     return env
 
 
@@ -120,13 +151,13 @@ def refresh(key: str) -> dict | None:
         return None
 
 
-def start(run: Path, cmd: list, key: str) -> subprocess.Popen:
+def start(run: Path, cmd: list, key: str, key_env: str) -> subprocess.Popen:
     for name in ("exit", "out", "err"):
         (run / name).unlink(missing_ok=True)
     script = f'"$0" "$@"; echo $? > {shlex.quote(str(run / "exit"))}'
     with open(run / "out", "w") as out, open(run / "err", "w") as err:
         proc = subprocess.Popen(["sh", "-c", script, *cmd], stdin=subprocess.DEVNULL, stdout=out,
-                                stderr=err, start_new_session=True, env=child_env(cmd, key))
+                                stderr=err, start_new_session=True, env=child_env(cmd, key, key_env))
     (run / "pid").write_text(str(proc.pid))
     return proc
 
@@ -167,8 +198,11 @@ def supervise(run: Path, key: str, budget: dict, job: dict, alive) -> int:
             window = snapshot and (run_over_cap(snapshot, budget, job) or ob.over_soft_cap(snapshot, budget))
             if window and window not in job["approved_windows"]:
                 os.killpg(job["pid"], signal.SIGSTOP)
-                paused = dict(job, window=window, spend=snapshot.get(f"usage_{window}"),
-                              cap=budget.get(f"{window}_usd"))
+                if window == "run":
+                    spend, cap = snapshot["usage"] - job["base_usage"], budget.get("per_run_usd")
+                else:
+                    spend, cap = snapshot.get(f"usage_{window}"), budget.get(f"{window}_usd")
+                paused = dict(job, window=window, spend=spend, cap=cap)
                 (run / "paused.json").write_text(json.dumps(paused))
                 print(f"OPENROUTER_PAUSED {job['run_id']}")
                 return 43
@@ -209,14 +243,15 @@ def finish(run: Path, key: str, budget: dict, job: dict) -> int:
         if IN_FLIGHT_RE.search(text) and not job.get("rerun"):
             time.sleep(poll_seconds())
             job["rerun"] = True
-            proc = start(run, job["command"], key)
+            proc = start(run, job["command"], key, job["key_env"])
             job["pid"] = proc.pid
             return supervise(run, key, budget, job, lambda: proc.poll() is None)
         if IN_FLIGHT_RE.search(text) or code in (42, 43):  # 42 and 43 are reserved for this contract
             code = 1
-    last_message = os.environ.get("OPENROUTER_LAST_MESSAGE")
-    if code == 0 and last_message and "--bare" in job["command"]:
-        Path(last_message).write_text(out)  # claude -p prints only its final message
+    if "--bare" in job["command"]:
+        out = redact(out)  # its tools can read .env files: never persist or relay a key it echoes
+        if code == 0 and job.get("last_message"):
+            Path(job["last_message"]).write_text(out)  # claude -p prints only its final message
     sys.stdout.write(out)
     sys.stderr.write(redact(err))
     return code
@@ -282,9 +317,11 @@ def main(argv: list) -> int:
     run = runs_dir() / run_id
     run.mkdir(parents=True)
     job = {"run_id": run_id, "pid": None, "task_file": task_file, "approved_windows": [], "command": cmd,
-           "base_usage": (start_data or {}).get("usage")}
+           "base_usage": (start_data or {}).get("usage"), "key_env": key_env,
+           # Kept in the job so a manual --resume still writes it.
+           "last_message": os.environ.get("OPENROUTER_LAST_MESSAGE") if "--bare" in cmd else None}
     guard(job)
-    proc = start(run, cmd, key)
+    proc = start(run, cmd, key, key_env)
     job["pid"] = proc.pid
     return supervise(run, key, budget, job, lambda: proc.poll() is None)
 
