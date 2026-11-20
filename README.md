@@ -325,6 +325,18 @@ mid-run, the run is suspended, not killed, and exits **43** ("paused, awaiting y
 decision"); you are asked to continue or stop. `openrouter_run.py --resume RUN_ID`
 continues it, `--stop RUN_ID` ends it and the remaining work goes through the normal
 handoff. A request already in flight when the pause happens still completes and bills.
+Each run also pauses once it has spent `openrouter.budget.per_run_usd` (default $1, 0 = off;
+resuming grants one more), even without a monthly budget, and Codex compacts its context at
+64k tokens with tool outputs capped at 6k, because every agent step resends the whole context.
+Anthropic models (`anthropic/*`, e.g. Fable) run through headless Claude Code (`claude -p --bare`)
+instead of Codex: it marks prompt-cache breakpoints, so each step reads its context from cache, and
+`--bare` authenticates only with the OpenRouter key, never your Claude subscription. `--restricted`
+ignores settings files, so no allow rule widens the run. Read-only runs get only Read/Grep/Glob;
+write runs get Bash only inside Claude Code's sandbox (no network, confined writes) and no Bash where
+that sandbox cannot start (for example inside an already sandboxed shell). The per-run $1 allowance
+applies to existing setups too: a long Fable run asks before each further dollar. OpenRouter reviews skip the agent loop: `scripts/review_run.py` sends the request (task plus
+diff with context) in one call and refuses requests over about 100k tokens. Agents report in a
+short `STATUS/RESULT/EVIDENCE/NEXT` format, since their replies become the session's input.
 
 ## Fallback behavior
 
@@ -413,7 +425,7 @@ then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
 | Dispatch denied by `[cost-aware-orchestrator]` | Follow the reason, or add a `Justification:` line for a standard task that needs the architect |
 | Codex wrapper exits 1 with "not logged in" | Run `codex login`. This is not a quota failure, so there is no fallback |
 | OpenRouter never used | Needs `engines.openrouter: true` and a non-empty key variable in the shell that launched Claude Code (restart it after editing your profile) |
-| Run exits 43 | Over a daily/weekly cap mid-run: `openrouter_run.py --resume RUN_ID` or `--stop RUN_ID` |
+| Run exits 43 | Over a daily/weekly cap or the per-run allowance mid-run: `openrouter_run.py --resume RUN_ID` or `--stop RUN_ID` |
 | Hook seems silent | Check `claude --debug`. The hook prints JSON with `hookSpecificOutput.additionalContext` |
 
 ## Running tests

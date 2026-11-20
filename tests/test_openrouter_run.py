@@ -1,5 +1,6 @@
 """OpenRouter runner: exit-code contract and pause-and-ask supervision, using a fake codex."""
 
+import json
 import os
 import signal
 import subprocess
@@ -148,6 +149,8 @@ def test_key_never_in_args(tmp_path, env):
     args = (tmp_path / "args").read_text()
     assert KEY not in args
     assert 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"' in args and "--model x/model" in args
+    # Agent steps resend the whole context: it is compacted early and tool outputs are capped.
+    assert "model_auto_compact_token_limit=64000" in args and "tool_output_token_limit=6000" in args
 
 
 def test_stale_cached_snapshot_does_not_pause(tmp_path, env, fake_openrouter):
@@ -180,3 +183,81 @@ def test_last_message_flag_is_passed_only_when_set(tmp_path, env, value, expecte
     assert code == 0 and ("-o" in words) is expected
     if expected:
         assert words[words.index("-o") + 1] == value and words.index("exec") < words.index("-o")
+
+
+def test_run_over_its_allowance_pauses_and_resume_grants_one_more(project, tmp_path, env, fake_openrouter):
+    # No daily/weekly caps: the per-run allowance still stops a runaway agent loop.
+    (project / ".claude" / "orchestrator.config.json").write_text(json.dumps({"openrouter": {"budget": {"per_run_usd": 1}}}))
+    fake_openrouter.key_data["usage"] = 10.0
+    proc = start(tmp_path, env, FAKE_SLEEP="5", FAKE_OUT="finished")
+    wait_for(lambda: pid_files(project))
+    fake_openrouter.key_data["usage"] = 11.2
+    out, _ = proc.communicate(timeout=4)
+    assert proc.returncode == 43
+    run_id = out.split("OPENROUTER_PAUSED ")[1].strip()
+    paused = json.loads((project / ".claude" / "orchestrator" / "openrouter-runs" / run_id / "paused.json").read_text())
+    assert (paused["window"], paused["base_usage"], paused["cap"]) == ("run", 10.0, 1)
+    assert abs(paused["spend"] - 1.2) < 1e-9
+    resumed = start(tmp_path, env, "--resume", run_id)
+    time.sleep(0.6)
+    fake_openrouter.key_data["usage"] = 12.1  # past the second allowance: pauses again
+    out, _ = resumed.communicate(timeout=4)
+    assert resumed.returncode == 43
+    run(tmp_path, env, "--stop", run_id)
+
+
+def test_zero_allowance_never_pauses(project, tmp_path, env, fake_openrouter):
+    (project / ".claude" / "orchestrator.config.json").write_text(json.dumps({"openrouter": {"budget": {"per_run_usd": 0}}}))
+    fake_openrouter.key_data["usage"] = 0
+    proc = start(tmp_path, env, FAKE_SLEEP="1", FAKE_OUT="finished")
+    wait_for(lambda: pid_files(project))
+    fake_openrouter.key_data["usage"] = 50
+    out, _ = proc.communicate(timeout=4)
+    assert (proc.returncode, out) == (0, "finished")
+
+
+FAKE_CLAUDE = """#!/bin/sh
+echo "$@" > "$FAKE_DIR/claude-args"
+printf '%s|%s|%s|%s' "$ANTHROPIC_API_KEY" "$ANTHROPIC_BASE_URL" "${ANTHROPIC_AUTH_TOKEN-unset}" "${OPENROUTER_API_KEY-unset}" > "$FAKE_DIR/claude-env"
+printf 'final answer %s' "${FAKE_ECHO:-}"
+"""
+
+
+@pytest.fixture
+def claude_env(env, tmp_path):
+    fake = tmp_path / "fake-claude"
+    fake.write_text(FAKE_CLAUDE)
+    fake.chmod(0o755)
+    return dict(env, CLAUDE_BIN=str(fake), OPENROUTER_MODEL="anthropic/claude-haiku-5.5", ANTHROPIC_AUTH_TOKEN="sub")
+
+
+def test_anthropic_models_run_through_bare_claude_code(tmp_path, claude_env):
+    # Claude Code marks prompt-cache breakpoints that Codex's requests lack; --bare never bills the subscription.
+    code, out, _ = run(tmp_path, claude_env, OPENROUTER_EFFORT="medium", OPENROUTER_LAST_MESSAGE=str(tmp_path / "last.md"))
+    assert (code, out) == (0, "final answer ")
+    assert not (tmp_path / "args").exists(), "codex must not run"
+    args = (tmp_path / "claude-args").read_text()
+    assert "--no-session-persistence --model anthropic/claude-haiku-5.5" in args
+    assert "-p --bare --restricted --strict-mcp-config" in args
+    assert "--tools=Read,Grep,Glob --effort" in args and "Bash" not in args and "acceptEdits" not in args
+    assert "--effort=medium -- do the thing" in args and KEY not in args
+    key, base, token, or_key = (tmp_path / "claude-env").read_text().split("|")
+    assert (key, base, token, or_key) == (KEY, ob.api_base()[:-3] if ob.api_base().endswith("/v1") else ob.api_base(), "unset", "unset")
+    assert (tmp_path / "last.md").read_text() == "final answer "
+
+
+def test_claude_code_write_runs_bash_only_in_its_sandbox(tmp_path, claude_env, monkeypatch):
+    import openrouter_run
+    run(tmp_path, claude_env, OPENROUTER_SANDBOX="workspace-write")
+    args = (tmp_path / "claude-args").read_text()
+    if openrouter_run.sandbox_available():
+        assert "--tools=Read,Grep,Glob,Edit,Write,Bash --allowedTools=Bash --permission-mode=acceptEdits" in args
+        assert '"allowUnsandboxedCommands": false, "failIfUnavailable": true' in args
+    monkeypatch.setattr(openrouter_run, "sandbox_available", lambda: False)
+    cmd = openrouter_run.claude_command("anthropic/x", "", "workspace-write", "p")
+    assert "--tools=Read,Grep,Glob,Edit,Write" in cmd and not any("Bash" in a for a in cmd)
+
+
+def test_claude_code_output_is_redacted(tmp_path, claude_env):
+    code, out, _ = run(tmp_path, claude_env, FAKE_ECHO=KEY, OPENROUTER_LAST_MESSAGE=str(tmp_path / "last.md"))
+    assert code == 0 and KEY not in out and KEY not in (tmp_path / "last.md").read_text()

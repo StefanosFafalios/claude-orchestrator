@@ -38,7 +38,8 @@ class Failure(Exception):
         self.code = code
 
 
-def research(query: str, model: str, effort: str | None, config: dict, state: dict) -> str:
+def chat(body: dict, config: dict, state: dict, timeout: float) -> dict:
+    """One chat-completions call after the budget checks; HTTP 402 / key limit raise exit 42."""
     if not engine_enabled(config, "openrouter"):
         raise Failure("OpenRouter is not set up")
     status = effective_status(state["openrouter"], config)
@@ -50,6 +51,24 @@ def research(query: str, model: str, effort: str | None, config: dict, state: di
     key = os.environ.get(config["openrouter"]["key_env"])
     if not key:
         raise Failure("OpenRouter has no API key")
+    request = urllib.request.Request(ob.api_base() + "/chat/completions", data=json.dumps(body).encode("utf-8"),
+                                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = redact(exc.read().decode("utf-8", "replace"))[:200]
+        limited = exc.code == 402 or (exc.code == 403 and any(
+            phrase in detail.lower() for phrase in ("key limit", "limit exceeded")))
+        raise Failure(f"OpenRouter answered {exc.code}: {detail}", 42 if limited else 1) from exc
+
+
+def cost_line(answer: dict) -> str:
+    cost = (answer.get("usage") or {}).get("cost")
+    return f"\n\nCost: ${cost:.4f}" if isinstance(cost, (int, float)) and not isinstance(cost, bool) else ""
+
+
+def research(query: str, model: str, effort: str | None, config: dict, state: dict) -> str:
     body = {"model": model,
             "messages": [{"role": "system", "content": INSTRUCTIONS},
                          {"role": "user", "content": redact(query)[:MAX_QUERY_CHARS]}]}  # redact first: a cut token would slip past
@@ -57,16 +76,7 @@ def research(query: str, model: str, effort: str | None, config: dict, state: di
         body["reasoning"] = {"effort": effort}
     if not model.startswith("perplexity/"):  # only Perplexity models search on their own
         body["plugins"] = [{"id": "web"}]
-    request = urllib.request.Request(ob.api_base() + "/chat/completions", data=json.dumps(body).encode("utf-8"),
-                                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=DEEP_TIMEOUT if "deep-research" in model else TIMEOUT) as response:
-            answer = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = redact(exc.read().decode("utf-8", "replace"))[:200]
-        limited = exc.code == 402 or (exc.code == 403 and any(
-            phrase in detail.lower() for phrase in ("key limit", "limit exceeded")))
-        raise Failure(f"OpenRouter answered {exc.code}: {detail}", 42 if limited else 1) from exc
+    answer = chat(body, config, state, DEEP_TIMEOUT if "deep-research" in model else TIMEOUT)
     message = answer["choices"][0]["message"]
     report = (message.get("content") or "").strip()
     if not report:
@@ -79,10 +89,7 @@ def research(query: str, model: str, effort: str | None, config: dict, state: di
     urls = list(dict.fromkeys(u for u in found if isinstance(u, str) and u.startswith(("http://", "https://"))))
     if urls:
         report += "\n\nSources:\n" + "\n".join(f"- {u}" for u in urls)
-    cost = (answer.get("usage") or {}).get("cost")
-    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
-        report += f"\n\nCost: ${cost:.4f}"
-    return report
+    return report + cost_line(answer)
 
 
 def main(argv: list[str] | None = None) -> int:

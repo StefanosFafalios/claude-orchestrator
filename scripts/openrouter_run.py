@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Run a task through an OpenRouter model via the Codex CLI, supervising spend.
+"""Run a task through an OpenRouter model via the Codex CLI (Claude Code for anthropic/*), supervising spend.
 
 Usage: openrouter_run.py <task-file> | --resume RUN_ID | --stop RUN_ID
 Exit codes: 0 success, 42 budget/usage limit (prints OPENROUTER_USAGE_LIMIT), 43 paused
-over a soft cap (prints OPENROUTER_PAUSED <run-id>), 1 other failure, 2 bad usage.
+over a soft cap or this run's ``per_run_usd`` allowance (prints OPENROUTER_PAUSED <run-id>;
+``--resume`` grants one more allowance), 1 other failure, 2 bad usage.
 Env: OPENROUTER_MODEL (required), OPENROUTER_EFFORT, OPENROUTER_SANDBOX (read-only |
 workspace-write; default read-only), CODEX_BIN (default codex), OPENROUTER_POLL_SECONDS
-(default 30), OPENROUTER_LAST_MESSAGE (file for the final message). The API key is read from the environment variable named in the config and
-is never placed on the command line: Codex reads it through ``env_key``.
+(default 30), OPENROUTER_LAST_MESSAGE (file for the final message), CLAUDE_BIN (default claude).
+The API key is read from the environment variable named in the config and is never placed on the
+command line: Codex reads it through ``env_key``, Claude Code through ANTHROPIC_API_KEY.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -31,6 +34,9 @@ RUN_ID_RE = re.compile(r"^[0-9T]{15}-[0-9a-f]{6}$")
 LIMIT_RE = re.compile(r"openrouter_key_limit|openrouter_credits|openrouter_guardrail_budget"
                       r"|openrouter_workspace_budget|Payment Required|\b402\b")
 IN_FLIGHT_RE = re.compile(r"openrouter_in_flight_budget")
+# ponytail: fixed limits; make them config keys if a project needs larger agent contexts.
+COMPACT_TOKENS = 64000  # paid per token: a 3.9M-token review averaged ~40k input per step
+TOOL_OUTPUT_TOKENS = 6000
 
 
 class UsageError(Exception):
@@ -55,6 +61,8 @@ def build_command(config: dict, prompt: str) -> list:
         raise UsageError(f"invalid OPENROUTER_SANDBOX: {sandbox}")
     if effort and not re.fullmatch(r"[a-z]+", effort):
         raise UsageError(f"invalid OPENROUTER_EFFORT: {effort}")
+    if model.startswith("anthropic/"):
+        return claude_command(model, effort, sandbox, prompt)
     # -c values are TOML; a JSON string is a valid TOML basic string.
     overrides = {
         "model_provider": "openrouter",
@@ -64,12 +72,74 @@ def build_command(config: dict, prompt: str) -> list:
     }
     if effort:
         overrides["model_reasoning_effort"] = effort
+    # Every agent step resends the whole context: compact it early and cap what each tool output adds.
+    overrides["model_auto_compact_token_limit"] = COMPACT_TOKENS
+    overrides["tool_output_token_limit"] = TOOL_OUTPUT_TOKENS
     cmd = [os.environ.get("CODEX_BIN") or "codex", "exec", "--sandbox", sandbox, "--model", model]
     for name, value in overrides.items():
         cmd += ["-c", f"{name}={json.dumps(value)}"]
     if os.environ.get("OPENROUTER_LAST_MESSAGE"):
         cmd += ["-o", os.environ["OPENROUTER_LAST_MESSAGE"]]  # exec option: the final message, untruncated
     return cmd + [prompt]
+
+
+# failIfUnavailable: a sandbox that cannot start must stop the run, never run the shell unconfined.
+SANDBOX_SETTINGS = json.dumps({"sandbox": {"enabled": True, "allowUnsandboxedCommands": False, "failIfUnavailable": True}})
+
+
+def sandbox_available() -> bool:
+    """Claude Code sandboxes Bash with Seatbelt on macOS and bubblewrap on Linux.
+
+    Its Linux sandbox nests a user namespace, which fails when the caller is already sandboxed
+    (e.g. a Claude Code session's own Bash), so probe exactly that instead of trusting ``bwrap``.
+    """
+    if sys.platform == "darwin":
+        return True
+    if not (shutil.which("bwrap") and shutil.which("unshare")):
+        return False
+    probe = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--unshare-user", "--unshare-pid", "--proc", "/proc",
+             "--", "unshare", "-U", "-r", "true"]
+    try:
+        return subprocess.run(probe, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def claude_command(model: str, effort: str, sandbox: str, prompt: str) -> list:
+    """Anthropic models run through headless Claude Code: it marks prompt-cache breakpoints, which
+    Codex's OpenAI-style requests do not, so each agent step reads its context from cache.
+
+    ``--bare`` skips hooks, plugins and CLAUDE.md and authenticates only with ANTHROPIC_API_KEY (set
+    in ``child_env``), so the run never bills the Claude subscription; ``--restricted`` ignores
+    settings files (a project's or user's allow rules cannot widen the scope) and keeps file tools in
+    the working directory. Read-only runs get no command tool at all; write runs get Bash only inside
+    Claude Code's sandbox (no network, writes confined), and none where the sandbox cannot run.
+    """
+    cmd = [os.environ.get("CLAUDE_BIN") or "claude", "-p", "--bare", "--restricted", "--strict-mcp-config",
+           "--no-session-persistence", "--model", model]
+    if sandbox == "read-only":
+        cmd += ["--tools=Read,Grep,Glob"]
+    elif sandbox_available():
+        cmd += ["--tools=Read,Grep,Glob,Edit,Write,Bash", "--allowedTools=Bash", "--permission-mode=acceptEdits",
+                f"--settings={SANDBOX_SETTINGS}"]
+    else:
+        cmd += ["--tools=Read,Grep,Glob,Edit,Write", "--permission-mode=acceptEdits"]
+    if effort:
+        cmd += [f"--effort={effort}"]
+    return cmd + ["--", prompt]
+
+
+def child_env(cmd: list, key: str, key_env: str) -> dict:
+    """Claude Code reaches OpenRouter through its Anthropic-compatible API; the key stays out of argv,
+    and only the variable Claude Code itself reads carries it (Codex needs ``key_env`` instead)."""
+    env = dict(os.environ)
+    if "--bare" in cmd:
+        for name in (key_env, "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                     "CLAUDE_CODE_USE_FOUNDRY"):  # a cloud provider would bill its own account instead
+            env.pop(name, None)
+        env.update(ANTHROPIC_BASE_URL=re.sub(r"/v1$", "", ob.api_base()), ANTHROPIC_API_KEY=key)
+    return env
 
 
 def refresh(key: str) -> dict | None:
@@ -82,13 +152,13 @@ def refresh(key: str) -> dict | None:
         return None
 
 
-def start(run: Path, cmd: list) -> subprocess.Popen:
+def start(run: Path, cmd: list, key: str, key_env: str) -> subprocess.Popen:
     for name in ("exit", "out", "err"):
         (run / name).unlink(missing_ok=True)
     script = f'"$0" "$@"; echo $? > {shlex.quote(str(run / "exit"))}'
     with open(run / "out", "w") as out, open(run / "err", "w") as err:
         proc = subprocess.Popen(["sh", "-c", script, *cmd], stdin=subprocess.DEVNULL, stdout=out,
-                                stderr=err, start_new_session=True)
+                                stderr=err, start_new_session=True, env=child_env(cmd, key, key_env))
     (run / "pid").write_text(str(proc.pid))
     return proc
 
@@ -126,16 +196,34 @@ def supervise(run: Path, key: str, budget: dict, job: dict, alive) -> int:
             next_check = time.monotonic() + poll
             # Only a snapshot fetched now is judged: over_soft_cap ignores observed_at.
             snapshot = refresh(key)
-            window = snapshot and ob.over_soft_cap(snapshot, budget)
+            window = snapshot and (run_over_cap(snapshot, budget, job) or ob.over_soft_cap(snapshot, budget))
             if window and window not in job["approved_windows"]:
                 os.killpg(job["pid"], signal.SIGSTOP)
-                paused = dict(job, window=window, spend=snapshot.get(f"usage_{window}"),
-                              cap=budget.get(f"{window}_usd"))
+                if window == "run":
+                    spend, cap = snapshot["usage"] - job["base_usage"], budget.get("per_run_usd")
+                else:
+                    spend, cap = snapshot.get(f"usage_{window}"), budget.get(f"{window}_usd")
+                paused = dict(job, window=window, spend=spend, cap=cap)
                 (run / "paused.json").write_text(json.dumps(paused))
                 print(f"OPENROUTER_PAUSED {job['run_id']}")
                 return 43
         time.sleep(min(poll, 0.5))
     return finish(run, key, budget, job)
+
+
+def run_over_cap(snapshot: dict, budget: dict, job: dict) -> str | None:
+    """``"run"`` once this run has spent its allowance (``per_run_usd``, 0 = off; each resume adds one).
+
+    ponytail: spend is the key's total, so a concurrent run on the same key counts too; per-generation
+    accounting would need OpenRouter's generation ids, which Codex does not expose.
+    """
+    cap = ob._num(budget.get("per_run_usd"))
+    total = snapshot.get("usage")
+    if cap <= 0 or not isinstance(total, (int, float)):
+        return None
+    if job.get("base_usage") is None:
+        job["base_usage"] = total  # the start fetch failed: count from the first one that works
+    return "run" if total - job["base_usage"] >= cap * job.get("run_allowances", 1) else None
 
 
 def finish(run: Path, key: str, budget: dict, job: dict) -> int:
@@ -156,11 +244,15 @@ def finish(run: Path, key: str, budget: dict, job: dict) -> int:
         if IN_FLIGHT_RE.search(text) and not job.get("rerun"):
             time.sleep(poll_seconds())
             job["rerun"] = True
-            proc = start(run, job["command"])
+            proc = start(run, job["command"], key, job.get("key_env") or "OPENROUTER_API_KEY")  # runs paused before key_env was stored
             job["pid"] = proc.pid
             return supervise(run, key, budget, job, lambda: proc.poll() is None)
         if IN_FLIGHT_RE.search(text) or code in (42, 43):  # 42 and 43 are reserved for this contract
             code = 1
+    if "--bare" in job["command"]:
+        out = redact(out)  # its tools can read .env files: never persist or relay a key it echoes
+        if code == 0 and job.get("last_message"):
+            Path(job["last_message"]).write_text(out)  # claude -p prints only its final message
     sys.stdout.write(out)
     sys.stderr.write(redact(err))
     return code
@@ -201,7 +293,11 @@ def main(argv: list) -> int:
             return 1
         if len(argv) == 2 and argv[0] == "--resume":
             run, job = load_paused(argv[1])
-            job["approved_windows"] = job["approved_windows"] + [job.pop("window")]
+            window = job.pop("window")
+            if window == "run":  # approval buys one more per-run allowance, not an unlimited run
+                job["run_allowances"] = job.get("run_allowances", 1) + 1
+            else:
+                job["approved_windows"] = job["approved_windows"] + [window]
             (run / "paused.json").unlink()
             guard(job)
             os.killpg(job["pid"], signal.SIGCONT)
@@ -213,7 +309,7 @@ def main(argv: list) -> int:
     except UsageError as exc:
         print(exc, file=sys.stderr)
         return 2
-    refresh(key)
+    start_data = refresh(key)
     snapshot = ob.read_snapshot()  # cap_spent is window-aware, so a stale cache is safe here
     if snapshot and ob.cap_spent(snapshot, budget, time.time()):
         print("OPENROUTER_USAGE_LIMIT")
@@ -221,9 +317,12 @@ def main(argv: list) -> int:
     run_id = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + "-" + secrets.token_hex(3)
     run = runs_dir() / run_id
     run.mkdir(parents=True)
-    job = {"run_id": run_id, "pid": None, "task_file": task_file, "approved_windows": [], "command": cmd}
+    job = {"run_id": run_id, "pid": None, "task_file": task_file, "approved_windows": [], "command": cmd,
+           "base_usage": (start_data or {}).get("usage"), "key_env": key_env,
+           # Kept in the job so a manual --resume still writes it.
+           "last_message": os.environ.get("OPENROUTER_LAST_MESSAGE") if "--bare" in cmd else None}
     guard(job)
-    proc = start(run, cmd)
+    proc = start(run, cmd, key, key_env)
     job["pid"] = proc.pid
     return supervise(run, key, budget, job, lambda: proc.poll() is None)
 

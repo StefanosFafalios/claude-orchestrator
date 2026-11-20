@@ -65,6 +65,11 @@ Workflow:
    `verifier`/`codex-reviewer` as routed, and apply the exit-42 fallback.
    Do not dispatch generic subagents with the session model for plan tasks;
    brainstorming and plan writing stay in the session.
+   Token economy: every subagent reply is resent as input on each later turn, and OpenRouter
+   bills each agent step for its whole context. Brief subagents with file paths, not pasted
+   content or session history; keep their replies to the agents' `## Reporting` format; send
+   OpenRouter reviews through `review_run.py` (one call) and agentic work through
+   `openrouter_run.py` (context compacted at 64k tokens, $`per_run_usd` pauses per run).
 10. Re-tier at most once per task, as in `references/routing-policy.md#re-tiering`: rerun
    `route_engine.py` with the scout's route or one step up/down from the implementer
    (never below the safety floor or down from critical or supercritical), plan if it became complex/critical, and hand off.

@@ -49,13 +49,12 @@
 - Never add agent attribution (`Co-Authored-By` trailers, "Generated with" lines) to commits or PRs.
 
 ## Output contract
-Return:
-1. Summary of changes
-2. Files changed
-3. Tests run and results
-4. Remaining risks
-5. Any work intentionally not completed
-6. End with an "Approach and decisions" section: what was done, why, and alternatives rejected.
+Reply to the orchestrator, not a user: dense, no preamble, narration or restated task.
+STATUS: done | partial | blocked | failed
+RESULT: changes made; files changed
+EVIDENCE: tests run and results; key values only
+NEXT: work intentionally not completed and remaining risks, or none
+End with an "Approach and decisions" section: at most 3 bullets on what was done, why, and alternatives rejected.
 
 ## Do not redo
 {{completed_work}}

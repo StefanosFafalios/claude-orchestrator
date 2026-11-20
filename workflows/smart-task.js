@@ -176,7 +176,7 @@ const DOCS_SCHEMA = {
     reason: { type: 'string' },
   },
 }
-// The body of agents/doc-updater.md, verbatim (a test checks it): Codex and OpenRouter get it in the prompt.
+// The body of agents/doc-updater.md up to its ## Reporting block, verbatim (a test checks it): Codex and OpenRouter get it in the prompt.
 const DOC_RULES = `Check whether the finished task changed behavior, commands, paths, conventions or workflows that the project's AI instruction docs describe. If it did, make the smallest accurate edit; otherwise edit nothing and report \`no change\`.
 
 Scope (edit only these):
@@ -306,6 +306,13 @@ if (impl.engine === 'none') return noEngine()
 const WRAPPERS = {
   codex: (r, sandbox) => `CODEX_SANDBOX=${sandbox} CODEX_MODEL=${q(r.model)} CODEX_EFFORT=${q(r.effort)} bash ${q(`${SCRIPTS}/codex_with_fallback.sh`)}`,
   openrouter: (r, sandbox) => `OPENROUTER_SANDBOX=${sandbox} OPENROUTER_MODEL=${q(r.model)} OPENROUTER_EFFORT=${q(r.effort)} ${PY('openrouter_run.py')}`,
+}
+
+// Reviews: OpenRouter takes the request in one call (review_run.py); its agentic loop resends the
+// whole growing context on every tool call, which cost millions of tokens per review.
+const REVIEWERS = {
+  ...WRAPPERS,
+  openrouter: r => `OPENROUTER_MODEL=${q(r.model)} OPENROUTER_EFFORT=${q(r.effort)} ${PY('review_run.py')}`,
 }
 
 // ponytail: one Bash call caps a wrapper run at 10 minutes; split larger work into handoffs.
@@ -699,7 +706,7 @@ function styleOn(r, lint) {
   const request = `${RUN}/style-review.md`
   return agent(`${brief}\n\nThis is the style review: ask only for standards, best-practice and reduction findings.\n` +
     `Plugin scripts directory: ${SCRIPTS}\nWrite the request to ${request} and run it on ${r.engine} model ${r.model} with:\n` +
-    `${WRAPPERS[r.engine](r, 'read-only')} ${q(request)}`, {
+    `${REVIEWERS[r.engine](r, 'read-only')} ${q(request)}`, {
     agentType: `${PLUGIN}:codex-reviewer`, label: `review:style:${r.engine}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: 'haiku', effort: 'low',
   })
 }
@@ -731,7 +738,7 @@ function reviewOn(r) {
   }
   const request = `${RUN}/review.md`
   return agent(`${brief}\n\nPlugin scripts directory: ${SCRIPTS}\nWrite the request to ${request} and run it on ${r.engine} model ${r.model} with:\n` +
-    `${WRAPPERS[r.engine](r, 'read-only')} ${q(request)}`, {
+    `${REVIEWERS[r.engine](r, 'read-only')} ${q(request)}`, {
     agentType: `${PLUGIN}:codex-reviewer`, label: `review:${r.engine}`, phase: 'Review', schema: FINDINGS_SCHEMA, model: 'haiku', effort: 'low',
   })
 }

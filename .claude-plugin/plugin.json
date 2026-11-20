@@ -1,6 +1,6 @@
 {
   "name": "cost-aware-orchestrator",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Token- and quota-aware orchestration for Claude Code: capability-based routing across Claude, Codex and OpenRouter, quota fallback with resumable handoffs, and independent review.",
   "repository": "https://github.com/StefanosFafalios/claude-orchestrator",
   "author": {

@@ -38,7 +38,8 @@
       "yearly_usd": 0,
       "monthly_usd": 0,
       "weekly_usd": 0,
-      "daily_usd": 0
+      "daily_usd": 0,
+      "per_run_usd": 1
     }
   },
   "codex": {
