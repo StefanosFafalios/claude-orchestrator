@@ -275,6 +275,7 @@ def set_engine_enabled(engine: str, enabled: bool, root: Path | None = None) -> 
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json.dumps(raw, indent=2) + "\n")
+        os.chmod(tmp, path.stat().st_mode if path.exists() else 0o644)  # mkstemp creates 0600
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -317,13 +318,14 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command in ("enable", "disable"):
         try:
+            key_env = load_config()["openrouter"]["key_env"]  # an invalid config is refused, never rewritten
             path = set_engine_enabled(args.engine, args.command == "enable")
         except ConfigError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         print(f"{args.engine} {args.command}d in {path}")
         if args.engine == "openrouter" and args.command == "enable":
-            key_env = load_config()["openrouter"]["key_env"]  # report presence only, never the value
+            # Report presence only, never the value.
             print(f"{key_env} is {'set' if os.environ.get(key_env) else 'NOT set: OpenRouter stays unused until it is'}")
         return 0
     try:
