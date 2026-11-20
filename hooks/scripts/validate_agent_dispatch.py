@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+import model_map  # noqa: E402
 from engine_state import ConfigError, load_config, load_state  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
@@ -26,6 +27,18 @@ def plugin_agent(subagent_type: str) -> str | None:
     prefix, _, name = subagent_type.rpartition(":")
     if name in AGENTS and prefix in ("", PLUGIN):
         return name
+    return None
+
+
+def unserved_model(model: str, root: Path) -> str | None:
+    """A catalog model the Claude subscription cannot run: Claude would silently substitute another."""
+    try:
+        config = load_config(root)
+    except ConfigError:
+        return None
+    if model in config["models"] and not model_map.engine_name(config, model, "claude"):
+        return (f"{model} is not served by the Claude subscription (it would silently run another model): "
+                "use the routed model, or run it through OpenRouter with openrouter_run.py.")
     return None
 
 
@@ -53,13 +66,13 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
     tool_input = payload.get("tool_input") or {}
-    agent = plugin_agent(str(tool_input.get("subagent_type") or ""))
-    if not agent:
-        return 0
-    # The prompt is the task; the model-written description only adds keyword noise.
-    prompt = str(tool_input.get("prompt") or tool_input.get("description") or "")
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd())
-    reason = violation(agent, prompt, root)
+    reason = unserved_model(str(tool_input.get("model") or ""), root)  # any agent type, not just ours
+    agent = plugin_agent(str(tool_input.get("subagent_type") or ""))
+    if agent and not reason:
+        # The prompt is the task; the model-written description only adds keyword noise.
+        prompt = str(tool_input.get("prompt") or tool_input.get("description") or "")
+        reason = violation(agent, prompt, root)
     if reason:
         print(json.dumps({
             "hookSpecificOutput": {

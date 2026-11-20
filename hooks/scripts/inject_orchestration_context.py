@@ -165,7 +165,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     lines = [
         "Save the prompt with Write, run decide_route.py --prompt-file <f>: its route is a floor, raise it from context; exit 3: use the rubric. ask:true: AskUserQuestion route vs alternative, headless: higher. State `route=<tier>: <reason>`, follow its row. Approvals (yes) keep it."
         if decider_usable(config, state) else
-        "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, then follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
+        "Classify this prompt using the whole conversation, state `route=<tier>: <reason>` in one line, follow that tier's row. A short approval (yes, go ahead) inherits the tier of what it approves, never lower.",
         f"Rubric: {RUBRIC}",
     ]
     if cls["route"] in FLOOR_ROUTES:
@@ -188,12 +188,12 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
     elif any(row.startswith("supercritical:") for row in rows):
-        lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>, then route with --task-id {task_key}.")
+        lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>; route with it.")
     lines.extend(rows)
     if "research" in config["routing"]:
         extra = (" Codex: CODEX_SEARCH=1, read-only." if any("research=Codex" in row for row in rows) else "") + (
             " OpenRouter: research_run.py --query-file <f> --model <m>." if any("research=OpenRouter" in row for row in rows) else "")
-        lines.append("Needs outside facts/docs (non-trivial): run the researcher agent per research= first, generic query only (no code/paths/names)." + extra)
+        lines.append("Needs outside facts (non-trivial): researcher agent per research= first, generic query only (no code/paths/names)." + extra)
     if has_type_rows(config):
         type_lines = []
         for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):
@@ -210,8 +210,9 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
         if type_lines:
             lines.append("Types (only if clearly one): frontend, debug, refactor, tests, docs: state route=<tier>/<type>, use its <tier>/<type> line.")
             lines.extend(type_lines)
-    lines.append("Tier change mid-task: switch rows, hand finished work over via a handoff; never downgrade critical. Multi-task plans: route each task with route_engine.py --task-id <task>.")
-    lines.append("Visibility: before each step, one line on what starts and why. Run Codex via Bash run_in_background; await its notice, don't read output early. Relay approach and key decisions in <=3 bullets.")
+    lines.append("Tier change mid-task: switch rows, hand over via a handoff; never downgrade critical. Multi-task plans: route each task with --task-id <task>.")
+    lines.append("Never move a routed step to a running agent on another model; re-issue a hook-refused Agent call unchanged.")
+    lines.append("Visibility: one line before each step on what starts and why. Run Codex in the background, await its notice. Relay approach and key decisions in <=3 bullets.")
     return "\n".join(lines)
 
 

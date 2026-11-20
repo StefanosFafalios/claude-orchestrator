@@ -14,8 +14,8 @@ and quota deliberately:
 - **Quota fallback**: when an engine is near or at its limit, the remaining work goes
   to another usable engine.
 - **Capability-based review**: the reviewer is the cheapest model in the task's review
-  row that is at least as capable as the implementer, on any engine, and never the exact
-  same model. Trivial tasks get no model review; tests and lint gate them.
+  row that is at least as capable as the implementer (or within 3 points when the row has
+  none stronger), on any engine, and never the exact same model. Trivial tasks get no model review; tests and lint gate them.
 - **Resumable handoffs**: the replacement engine gets a handoff listing completed work
   under `## Do not redo`, never the original broad prompt.
 - **Automatic activation**: on every prompt, a local hook injects a rubric, safety floor and
@@ -168,6 +168,7 @@ Add the runtime state to the project's `.gitignore`:
 /cost-aware-orchestrator:engine-status
 /cost-aware-orchestrator:session-usage
 /cost-aware-orchestrator:reset-engine-state
+/cost-aware-orchestrator:openrouter on    # or off; needs OPENROUTER_API_KEY to take effect
 ```
 
 The `request-feature` skill activates when you want orchestration behavior the plugin
@@ -222,7 +223,9 @@ implementer may correct it once per task (never below the safety floor; critical
 
 **Capability-based review.** Review rows are ordered cheapest first, and the reviewer is
 the first model in the task's row that is at least as capable as the implementer, on
-whichever engine can serve it. It is never the exact same model that implemented (on any
+whichever engine can serve it. The top models (Fable, GPT-6.2-astra) review only
+supercritical work, so below it the strongest implementer (Opus) is reviewed by a model
+within 3 points of it (e.g. Gemini 4 Carbon, Sonnet). It is never the exact same model that implemented (on any
 engine). Trivial tasks get no model review: the tests and lint gate them. The main review covers correctness, efficiency and security; a cheap haiku `style-reviewer`
 covers standards, best practices and code/text reduction (set `review.split` to false to merge them).
 
