@@ -41,7 +41,11 @@ other scripts and hooks import from it rather than re-implementing them.
 including optional task-type sub-rows. In the adaptive split OpenRouter only takes a row model
 that no healthy Claude or Codex engine serves (a later one in the row if needed).
 `scripts/openrouter_budget.py` derives spend caps and owns the OpenRouter key/model caches;
-`scripts/openrouter_run.py` runs OpenRouter models through Codex and supervises spend.
+`scripts/openrouter_run.py` runs OpenRouter models through Codex and supervises spend (window
+caps plus a `per_run_usd` allowance; context compacted at 64k tokens); `anthropic/*` models run
+through `claude -p --bare` against OpenRouter's Anthropic API instead, for prompt caching. `scripts/review_run.py`
+runs OpenRouter reviews in one chat call through `research_run.chat`. Every agent prompt ends with
+the shared `## Reporting` block (terse STATUS/RESULT/EVIDENCE/NEXT); keep it identical across agents.
 `scripts/decide_route.py` is the cheap tier decider: one direct OpenRouter call on the
 `routing.decider` row, clamped to the keyword floor; exit 3 (never 42) hands classification
 back to the session model and marks nothing. It also reports `confidence`, `alternative` and

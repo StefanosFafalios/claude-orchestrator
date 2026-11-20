@@ -345,9 +345,9 @@ def test_openrouter_review_row_and_run_line(project, write_config, monkeypatch):
     openrouter_only(write_config, monkeypatch, "review")
     text = context(project, "add a button")
     assert "codex-reviewer[OpenRouter]/vendor/model/medium" in text
-    assert "openrouter_run.py <handoff>; exit 43" in text
     run_line = next(line for line in text.splitlines() if line.startswith("OpenRouter: "))
-    assert "OPENROUTER_SANDBOX=workspace-write (read-only for scout/style)" in run_line
+    assert "OPENROUTER_SANDBOX=workspace-write (read-only for scout)" in run_line
+    assert "reviews and style: codex-reviewer with review_run.py (one call); exit 43" in run_line
     assert "codex_with_fallback.sh" not in text and "Rows marked [OpenRouter]" not in text
 
 
@@ -432,3 +432,10 @@ def test_research_hidden_when_it_needs_human_review(project):
     text = context(project, "add a button")
     standard = next(line for line in text.splitlines() if line.startswith("standard:"))
     assert "implement=" in standard and "research=" not in standard
+
+
+def test_every_agent_reports_tersely():
+    # Subagent replies are resent as input on every later turn of the main session.
+    for path in sorted((Path(__file__).parent.parent / "agents").glob("*.md")):
+        text = path.read_text()
+        assert text.count("## Reporting") == 1 and "STATUS: done | partial | blocked | failed" in text, path.name

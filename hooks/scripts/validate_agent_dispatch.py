@@ -49,7 +49,7 @@ def violation(agent: str, prompt: str, config: dict, root: Path) -> str | None:
     if agent == "implementer" and state["claude"].get("status") == "limited":
         return "Claude is marked limited: write a handoff and route implementation to another engine instead."
     if agent == "codex-reviewer":
-        engine = "openrouter" if "openrouter_run.py" in prompt else "codex"
+        engine = "openrouter" if "openrouter_run.py" in prompt or "review_run.py" in prompt else "codex"
         if state[engine].get("status") == "limited":
             return f"{LABELS[engine]} is marked limited: use the verifier agent for review instead."
     return None

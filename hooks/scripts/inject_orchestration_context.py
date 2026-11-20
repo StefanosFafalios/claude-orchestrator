@@ -62,7 +62,7 @@ def build_context(root: Path, prompt: str = "", session_id: str = "", permission
         lines.append(f"Legacy config keys ignored: {', '.join(config['legacy_keys'])}; "
                      'models now come from "models"/"routing" (see /cost-aware-orchestrator:setup).')
     if engine_enabled(config, "openrouter") and (config["openrouter"]["budget"].get("monthly_usd") or 0) <= 0:
-        lines.append("OpenRouter has no monthly budget: no pacing or pauses, only the key's own limit; "
+        lines.append("OpenRouter has no monthly budget: no pacing, only per-run pauses and the key's own limit; "
                      "set one with /cost-aware-orchestrator:setup.")
     if not config_path(root).is_file():
         lines.append(
@@ -181,7 +181,7 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if "codex" in used:
         lines.append("Codex: write_handoff.py, then CODEX_SANDBOX=workspace-write CODEX_MODEL=<model> CODEX_EFFORT=<effort> codex_with_fallback.sh <handoff>.")
     if "openrouter" in used:
-        lines.append("OpenRouter: write_handoff.py, then OPENROUTER_MODEL=<model> OPENROUTER_EFFORT=<effort> OPENROUTER_SANDBOX=workspace-write (read-only for scout/style) openrouter_run.py <handoff>; exit 43 = paused over budget: tell the user and ask continue (--resume <run>) or stop (--stop <run>).")
+        lines.append("OpenRouter: write_handoff.py, then OPENROUTER_MODEL=<model> OPENROUTER_EFFORT=<effort> OPENROUTER_SANDBOX=workspace-write (read-only for scout) openrouter_run.py <handoff>; reviews and style: codex-reviewer with review_run.py (one call); exit 43 = paused over budget: tell the user and ask continue (--resume <run>) or stop (--stop <run>).")
     for engine, label in LABELS.items():
         if engine in delegated:
             lines.append(f"Rows marked [{label}] implement on {label}: delegate, do not edit files in this Claude session.")

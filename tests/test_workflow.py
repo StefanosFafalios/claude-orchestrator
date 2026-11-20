@@ -153,7 +153,9 @@ def test_scout_and_style_review_run_on_openrouter(repo, write_config, monkeypatc
     assert "Scout findings (vendor/cheap):" in calls["implement:claude"]["prompt"]
     style = calls["review:style:openrouter"]
     assert style["agentType"] == "cost-aware-orchestrator:codex-reviewer" and "review:style" not in calls
-    assert "openrouter_run.py" in style["prompt"] and "vendor/cheap" in style["prompt"]
+    # Reviews take one OpenRouter call, never the agentic runner.
+    assert "review_run.py" in style["prompt"] and "openrouter_run.py" not in style["prompt"]
+    assert "vendor/cheap" in style["prompt"] and "OPENROUTER_SANDBOX" not in style["prompt"]
     assert "This is the style review" in style["prompt"]
 
 
@@ -206,7 +208,8 @@ def test_doc_updater_runs_on_openrouter_with_agent_rules(repo, write_config, mon
     assert "docs" not in calls and calls["docs:openrouter"]["exit_code"] == 0
     command = calls["docs:openrouter"]["command"]
     assert "OPENROUTER_SANDBOX=workspace-write" in command and "openrouter_run.py" in command and "vendor/cheap" in command
-    rules = (ROOT / "agents" / "doc-updater.md").read_text().split("---\n", 2)[2].strip()
+    # The shared ## Reporting block stays out: external engines answer with the JSON contract instead.
+    rules = (ROOT / "agents" / "doc-updater.md").read_text().split("---\n", 2)[2].split("\n## Reporting")[0].strip()
     prompt = (repo / ".claude" / "orchestrator" / "runs" / out["result"]["task_id"] / "docs.md").read_text()
     assert rules in prompt, "external engines get the doc-updater rules verbatim"
     assert "add unit tests for parser" in prompt
@@ -774,3 +777,16 @@ def test_skipped_research_does_not_block_the_architect_query(repo, openrouter, f
     assert len(research_run_calls(out)) == 1 and "--model 'perplexity/sonar'" in research_run_calls(out)[0]["command"]
     order = labels(out["calls"])
     assert order.index("plan") < order.index("research:openrouter")
+
+
+def test_main_review_on_openrouter_is_one_call(repo, write_config, monkeypatch, fake_openrouter):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    write_config({"engines": {"openrouter": True}, "balance": {"mode": "off"}, "review": {"split": False},
+                  "models": {"or-strong": {"score": 99, "engines": {"openrouter": "vendor/strong"}}},
+                  "routing": {"review": {"standard": {"models": ["or-strong"], "effort": "medium"}}}})
+    agents = {"implement:claude": DONE, "review:openrouter": dict(NO_FINDINGS, exit_code=0)}
+    out = run(repo, {"task": "add unit tests for parser", "args": {"classification": {"route": "standard", "reason": "t"}},
+                     "agents": agents})
+    review = {c["label"]: c for c in out["calls"]}["review:openrouter"]
+    assert "review_run.py" in review["prompt"] and "openrouter_run.py" not in review["prompt"]
+    assert "OPENROUTER_MODEL=" in review["prompt"] and "vendor/strong" in review["prompt"]

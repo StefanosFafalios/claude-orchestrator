@@ -37,6 +37,7 @@ def test_handoff_contains_contract_and_diff(project, write_config, capsys):
         "- Typecheck: (not configured)",
         "## Output contract",
         'End with an "Approach and decisions" section',
+        "STATUS: done | partial | blocked | failed",
         "## Do not redo\nAdded retry decorator to webhook client",
         "Co-Authored-By",
     ):

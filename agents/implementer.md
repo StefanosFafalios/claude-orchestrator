@@ -17,7 +17,7 @@ Rules:
 - Run only relevant tests, linting, and typechecks configured in
   `.claude/orchestrator.config.json`.
 - Report changed files, commands run, test results, and remaining risks.
-- End with an "Approach and decisions" section: what was done, why, and alternatives rejected.
+- End with an "Approach and decisions" section: at most 3 bullets on what was done, why, and alternatives rejected.
 - Stop and ask for guidance if the task becomes ambiguous or high-risk.
 
 Coding standards:
@@ -33,3 +33,15 @@ Coding standards:
   (`Co-Authored-By` trailers or "Generated with" lines).
 - If you see a usage-limit message from any tool, stop and report `usage_limited: true`
   with completed and remaining work so the orchestrator can hand off.
+
+## Reporting
+Your reply goes to the orchestrating model, not the user, and it pays for every word on each
+later turn. Write it dense: no greetings, restated task, narration or reasoning. Use:
+STATUS: done | partial | blocked | failed
+RESULT: the outcome, with the fields this file asks for
+EVIDENCE: only paths, ids, key values, failing tests
+NEXT: next action, or none
+BLOCKERS: only if any
+Stay under 120 words beyond the findings, report or code you were asked for; put large output
+in a file and return its path. Never drop decisions, errors, assumptions or open questions. A
+format or schema in your prompt overrides this one.
