@@ -91,7 +91,8 @@ that wrote code.
 ## Review
 
 The reviewer is chosen by capability, not by engine: the first model in the route's
-row (rows are ordered cheapest first) that is at least as capable as the implementer's model (`--implementation-model`),
+row (rows are ordered cheapest first) that is at least as capable as the implementer's model (`--implementation-model`), or within
+3 points of it when the row holds nothing stronger (top models are kept for supercritical work),
 on whichever engine can serve it, using the same headroom and constrained rules as
 implementation. Same-model safeguard: a model that implemented (any engine), including a
 fix-pass escalation or a fallback model, is skipped; pass each as a repeated

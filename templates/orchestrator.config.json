@@ -58,7 +58,6 @@
     "fable": {
       "score": 98,
       "engines": {
-        "claude": "claude-fable-5-2",
         "openrouter": "anthropic/claude-fable-5.2"
       }
     },
@@ -191,8 +190,7 @@
           "gemini-4-carbon",
           "sonnet",
           "gpt-6.2-sol",
-          "opus",
-          "gpt-6.2-astra"
+          "opus"
         ],
         "effort": "medium"
       },
@@ -201,8 +199,7 @@
           "gemini-4-carbon",
           "sonnet",
           "gpt-6.2-sol",
-          "opus",
-          "gpt-6.2-astra"
+          "opus"
         ],
         "effort": "high"
       },
@@ -210,8 +207,8 @@
         "models": [
           "gemini-4-carbon",
           "sonnet",
-          "opus",
-          "gpt-6.2-astra"
+          "gpt-6.2-sol",
+          "opus"
         ],
         "effort": "high"
       },
@@ -241,23 +238,27 @@
       "complex": {
         "models": [
           "opus",
-          "gpt-6.2-astra"
+          "gpt-6.2-sol"
         ],
         "effort": "high"
       },
       "critical": {
         "models": [
           "opus",
-          "gpt-6.2-astra"
+          "gpt-6.2-sol"
         ],
         "effort": "high"
       },
       "supercritical": {
         "models": [
           "fable",
-          "gpt-6.2-astra"
+          "gpt-6.2-astra",
+          "opus"
         ],
-        "effort": "medium"
+        "effort": "medium",
+        "model_effort": {
+          "opus": "high"
+        }
       }
     },
     "scout": {
@@ -382,7 +383,7 @@
       "critical": {
         "models": [
           "opus",
-          "gpt-6.2-astra",
+          "gpt-6.2-sol",
           "sonar-deep-research"
         ],
         "effort": "high"

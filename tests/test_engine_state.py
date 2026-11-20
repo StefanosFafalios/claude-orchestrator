@@ -130,3 +130,39 @@ def test_set_effort_records_and_validates(project, capsys):
     assert main(["set-effort", "--task-id", "../x", "--effort", "high"]) == 2
     main(["reset"])
     assert load_state()["supercritical_efforts"] == {}
+
+
+def test_enable_and_disable_engine_keep_other_keys(project, write_config):
+    path = write_config({"commands": {"test": "make test"}})
+    assert main(["enable", "openrouter"]) == 0
+    raw = json.loads(path.read_text())
+    assert raw == {"commands": {"test": "make test"}, "engines": {"openrouter": True}}
+    assert load_config()["engines"]["openrouter"] is True
+    assert main(["disable", "openrouter"]) == 0
+    assert json.loads(path.read_text())["engines"] == {"openrouter": False}
+
+
+def test_enable_creates_config_and_never_clobbers_invalid_json(project, write_config):
+    assert main(["enable", "openrouter"]) == 0
+    assert json.loads((project / ".claude" / "orchestrator.config.json").read_text()) == {"engines": {"openrouter": True}}
+    for bad in ("{oops", '{"engines": "yes"}', "[]", '{"routing": {"review": {"complex": {"models": ["nope"]}}}}'):
+        path = write_config(bad)
+        assert main(["disable", "openrouter"]) == 2
+        assert path.read_text() == bad
+
+
+def test_enable_openrouter_reports_key_presence_only(project, monkeypatch, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
+    assert main(["enable", "openrouter"]) == 0
+    out = capsys.readouterr().out
+    assert "OPENROUTER_API_KEY is set" in out and "sk-or-secret" not in out
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    main(["enable", "openrouter"])
+    assert "NOT set" in capsys.readouterr().out
+
+
+def test_enable_keeps_the_config_file_mode(project, write_config):
+    path = write_config({})
+    path.chmod(0o640)
+    assert main(["enable", "openrouter"]) == 0
+    assert path.stat().st_mode & 0o777 == 0o640

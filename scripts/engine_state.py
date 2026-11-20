@@ -260,6 +260,29 @@ def cmd_record_result(state: dict, args: argparse.Namespace) -> None:
         entry.update(status="healthy", remaining_pct=100, last_error=None)
 
 
+def set_engine_enabled(engine: str, enabled: bool, root: Path | None = None) -> Path:
+    """Write ``engines.<engine>`` into the project config atomically, keeping every other key."""
+    path = config_path(root)
+    try:
+        raw = json.loads(path.read_text()) if path.exists() else {}
+    except ValueError as exc:
+        raise ConfigError(f"{path}: invalid JSON ({exc}); not overwriting it") from exc
+    if not isinstance(raw, dict) or not isinstance(raw.setdefault("engines", {}), dict):
+        raise ConfigError(f"{path}: the config and its \"engines\" must be JSON objects; not overwriting it")
+    raw["engines"][engine] = enabled
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".orchestrator.config.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(raw, indent=2) + "\n")
+        os.chmod(tmp, path.stat().st_mode if path.exists() else 0o644)  # mkstemp creates 0600
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    return path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -282,6 +305,9 @@ def build_parser() -> argparse.ArgumentParser:
     result_p.add_argument("--task-id", required=True)
     result_p.add_argument("--status", choices=("success", "failed"), required=True)
 
+    for name in ("enable", "disable"):
+        sub.add_parser(name, help=f"{name} an engine in the project config").add_argument("engine", choices=ENGINES)
+
     effort_p = sub.add_parser("set-effort", help="record the effort chosen for a supercritical task")
     effort_p.add_argument("--task-id", required=True)
     effort_p.add_argument("--effort", choices=EFFORTS, required=True)
@@ -290,6 +316,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command in ("enable", "disable"):
+        try:
+            key_env = load_config()["openrouter"]["key_env"]  # an invalid config is refused, never rewritten
+            path = set_engine_enabled(args.engine, args.command == "enable")
+        except ConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"{args.engine} {args.command}d in {path}")
+        if args.engine == "openrouter" and args.command == "enable":
+            # Report presence only, never the value.
+            print(f"{key_env} is {'set' if os.environ.get(key_env) else 'NOT set: OpenRouter stays unused until it is'}")
+        return 0
     try:
         config = load_config()
     except ConfigError as exc:

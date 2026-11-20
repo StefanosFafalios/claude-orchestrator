@@ -49,14 +49,16 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   evidence, no override; never put `fable` above `medium` (owner rule).
 - Coverage: for every model an implementation row can pick on a Claude-only or a
   Codex-only setup, the review row for that route must hold a different model on the same
-  engine scoring at least as high (the shipped-template test in `tests/test_route_engine.py`
-  checks this). Strong models appended at the end of a review row cost nothing until needed.
-  Exception: when only a top model outranks the implementer (Opus on Claude alone), leave it
-  out; the router then picks the next-best different model and asks for human review.
+  engine scoring at least as high, or within 3 points when the row holds nothing stronger
+  (the shipped-template test in `tests/test_route_engine.py` checks this). Strong models
+  appended at the end of a review row cost nothing until needed. Never add a top model to
+  get coverage. Accepted gaps (human review): GPT-6.2-sol on Codex alone below critical, and
+  Opus on Claude alone at supercritical; the test lists them, so a new gap must be added there
+  on purpose.
 - Never add a model below the quality bar just to give an engine work (no Codex-only tails):
   unavailable Codex names are skipped automatically.
-- `supercritical` rows hold only the top models, and top models (e.g. `fable`) appear in no
-  other row: their effort is `medium` unless the user explicitly names an override.
+- `supercritical` rows hold only the top models, and top models (`fable`, `gpt-6.2-astra`) appear
+  in no other row (owner rule; Fable runs only on OpenRouter): their effort is `medium` unless the user explicitly names an override.
 - `docs` (the end-of-task doc updater) follows the `style_review` rule: the same models and
   effort, cheapest-first, `low`. A config without `routing.docs` routes on `style_review`.
 - `decider` (the cheap tier classifier) has a single `standard` row: the cheapest models

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """PreToolUse guardrail for subagent dispatches (Agent/Task tool).
 
-Denies dispatches of this plugin's agents that break the routing policy. Compliant
+Denies any dispatch naming a model the Claude subscription cannot run (it would silently
+substitute another model; this holds even with ``automatic: false``), and dispatches of this
+plugin's agents that break the routing policy. Compliant
 or unrelated dispatches produce no output, so Claude Code's normal permission flow
 applies unchanged (emitting "allow" would bypass the user's permission rules).
 """
@@ -15,7 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from engine_state import ConfigError, load_config, load_state  # noqa: E402
+import model_map  # noqa: E402
+from engine_state import ENGINES, ConfigError, load_config, load_state  # noqa: E402
 
 PLUGIN = "cost-aware-orchestrator"
 LABELS = {"codex": "Codex", "openrouter": "OpenRouter"}
@@ -29,11 +32,16 @@ def plugin_agent(subagent_type: str) -> str | None:
     return None
 
 
-def violation(agent: str, prompt: str, root: Path) -> str | None:
-    try:
-        config = load_config(root)
-    except ConfigError:
-        return None  # The scripts report config errors; never block on them here.
+def unserved_model(model: str, config: dict) -> str | None:
+    """A catalog model the Claude subscription cannot run: Claude would silently substitute another."""
+    model_id = next((m for m in (model_map.canonical(config, e, model) for e in ENGINES) if m), None) if model else None
+    if model_id and not model_map.engine_name(config, model_id, "claude"):
+        return (f"{model} is not served by the Claude subscription (it would silently run another model): "
+                "use the routed model, or run it through OpenRouter with openrouter_run.py.")
+    return None
+
+
+def violation(agent: str, prompt: str, config: dict, root: Path) -> str | None:
     if config.get("automatic") is False:
         return None
     state = load_state(root)
@@ -53,13 +61,17 @@ def main() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
     tool_input = payload.get("tool_input") or {}
-    agent = plugin_agent(str(tool_input.get("subagent_type") or ""))
-    if not agent:
-        return 0
-    # The prompt is the task; the model-written description only adds keyword noise.
-    prompt = str(tool_input.get("prompt") or tool_input.get("description") or "")
     root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd())
-    reason = violation(agent, prompt, root)
+    try:
+        config = load_config(root)
+    except ConfigError:
+        return 0  # The scripts report config errors; never block on them here.
+    reason = unserved_model(str(tool_input.get("model") or ""), config)  # any agent type, not just ours
+    agent = plugin_agent(str(tool_input.get("subagent_type") or ""))
+    if agent and not reason:
+        # The prompt is the task; the model-written description only adds keyword noise.
+        prompt = str(tool_input.get("prompt") or tool_input.get("description") or "")
+        reason = violation(agent, prompt, config, root)
     if reason:
         print(json.dumps({
             "hookSpecificOutput": {

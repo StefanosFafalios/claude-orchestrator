@@ -96,10 +96,13 @@ def test_reviewer_never_same_model(config):
 
 
 def test_reviewer_never_weaker_than_implementer(config):
-    # complex row [sol 82, opus 85, sonnet 70, luna 55]: nothing >= 85 except the implementer itself
+    # complex row [sol 82, opus 85, sonnet 70, luna 55]: nothing >= 85 except the implementer itself,
+    # so a near-equal (within SIMILAR_POINTS) different model reviews without a human
     r = route("review", "complex", config, state(), implementation_model="opus")
-    assert r["canonical_model"] == "gpt-6.1-sol" and r["requires_human_review"] is True
-    assert "no reviewer at least as capable" in r["reason"]
+    assert r["canonical_model"] == "gpt-6.1-sol" and r["requires_human_review"] is False
+    weaker = route("review", "complex", config, state(codex="limited"), implementation_model="opus")
+    assert weaker["canonical_model"] == "sonnet" and weaker["requires_human_review"] is True
+    assert "no reviewer at least as capable" in weaker["reason"]
     stronger = route("review", "complex", config, state(), implementation_model="gpt-6.1-sol")
     assert stronger["canonical_model"] == "opus" and stronger["requires_human_review"] is False
 
@@ -121,12 +124,17 @@ def test_trivial_tasks_get_no_review_or_scout(config):
 @pytest.mark.parametrize("only", ["claude", "codex"])
 @pytest.mark.parametrize("task_route", ["standard", "complex", "critical", "supercritical"])
 def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, only, task_route):
-    """Cheapest-first review rows still hold a stronger, different reviewer on a single engine.
+    """Cheapest-first review rows hold a stronger or near-equal, different reviewer on a single engine.
 
-    The one exception is Opus on Claude alone below supercritical: only the top model outranks
-    it, and top models review only supercritical work (their effort is asked), so a weaker,
-    different model reviews and a human checks.
+    Fable and Astra are reserved for supercritical work, so the strongest model below it (Opus,
+    or GPT-6.2-sol on Codex) is reviewed by a near-equal one; where the engine alone has none
+    (Codex, or Claude at supercritical without OpenRouter), a human checks.
     """
+    from route_engine import SIMILAR_POINTS
+    # Accepted gaps (owner rule: top models only in supercritical rows): no same-engine reviewer
+    # within reach, so a human checks. Any other gap is a template regression.
+    gaps = {("codex", "gpt-6.2-sol", "standard"), ("codex", "gpt-6.2-sol", "complex"),
+            ("claude", "opus", "supercritical")}
     monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
     write_config({"engines": {"claude": only == "claude", "codex": only == "codex"}})
     config = load_config()
@@ -134,11 +142,21 @@ def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, 
         if not engine_name(config, model, only):
             continue
         r = route("review", task_route, config, state(), implementation_model=model)
-        assert r["engine"] == only and r["canonical_model"] != model, (model, r)
-        if (only, model) == ("claude", "opus") and task_route != "supercritical":
-            assert r["requires_human_review"] is True, (model, r)
+        if (only, model, task_route) in gaps:
+            assert r["requires_human_review"] is True and r["canonical_model"] != model, (model, r)
             continue
-        assert r["requires_human_review"] is False and score(config, r["canonical_model"]) >= score(config, model), (model, r)
+        assert r["engine"] == only and r["canonical_model"] != model, (model, r)
+        assert r["requires_human_review"] is False, (model, r)
+        assert score(config, r["canonical_model"]) >= score(config, model) - SIMILAR_POINTS, (model, r)
+
+
+def test_shipped_top_models_stay_below_supercritical_review():
+    """Owner rule: Opus work below supercritical gets a near-equal reviewer, never Fable or Astra."""
+    routing = json.loads(TEMPLATE.read_text())["routing"]
+    for role, rows in routing.items():
+        for task_route, entry in rows.items():
+            if task_route != "supercritical":
+                assert not {"fable", "gpt-6.2-astra"} & set(entry["models"]), (role, task_route)
 
 
 def test_codex_model_missing_from_account_is_served_by_openrouter(write_config, monkeypatch, usage_files):
@@ -154,8 +172,10 @@ def test_shipped_top_models_only_in_supercritical_rows():
     routing = json.loads(TEMPLATE.read_text())["routing"]
     for role, rows in routing.items():
         for task_route, entry in rows.items():
-            if (role, task_route) in (("review", "supercritical"), ("architecture", "supercritical")):
+            if (role, task_route) == ("review", "supercritical"):
                 assert entry["models"] == ["fable", "gpt-6.2-astra"]
+            elif (role, task_route) == ("architecture", "supercritical"):  # Opus plans when Fable can't run
+                assert entry["models"] == ["fable", "gpt-6.2-astra", "opus"]
             else:
                 assert "fable" not in entry["models"], (role, task_route)
 

@@ -59,8 +59,11 @@ def test_reports_engine_state(project):
     assert "codex=limited(0%)" in context(project)
 
 
-def dispatch(project, agent, prompt):
-    payload = {"tool_name": "Agent", "cwd": str(project), "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "x"}}
+def dispatch(project, agent, prompt, model=None):
+    tool_input = {"subagent_type": agent, "prompt": prompt, "description": "x"}
+    if model:
+        tool_input["model"] = model
+    payload = {"tool_name": "Agent", "cwd": str(project), "tool_input": tool_input}
     out = run_hook("validate_agent_dispatch.py", payload, project)
     if out is None:
         return "allow", ""
@@ -86,6 +89,20 @@ def test_engine_limits_block_matching_agents(project):
     assert dispatch(project, "cost-aware-orchestrator:implementer", "add tests")[0] == "allow"
 
 
+def test_denies_models_the_claude_subscription_cannot_run(project):
+    # Claude would silently substitute another model, as for fable in the template.
+    path = Path(os.environ["ORCHESTRATOR_DEFAULT_CONFIG"])
+    config = json.loads(path.read_text())
+    config["models"]["fable"]["engines"] = {"openrouter": "anthropic/claude-fable-5.2"}
+    path.write_text(json.dumps(config))
+    decision, reason = dispatch(project, "general-purpose", "add tests", model="fable")
+    assert decision == "deny" and "OpenRouter" in reason
+    assert dispatch(project, "cost-aware-orchestrator:verifier", "review", model="fable")[0] == "deny"
+    assert dispatch(project, "general-purpose", "x", model="anthropic/claude-fable-5.2")[0] == "deny"
+    assert dispatch(project, "general-purpose", "add tests", model="opus")[0] == "allow"
+    assert dispatch(project, "general-purpose", "add tests", model="inherit")[0] == "allow"
+
+
 def test_style_reviewer_is_allowed(project):
     assert dispatch(project, "cost-aware-orchestrator:style-reviewer", "review diff")[0] == "allow"
     assert dispatch(project, "style-reviewer", "review diff")[0] == "allow"
@@ -108,6 +125,7 @@ def test_directive_rows_rubric_and_floor(project, write_config):
     assert "inherits the tier of what it approves, never lower" in text
     assert text.count("Agents are cost-aware-orchestrator:<name>.") == 1
     assert "Floor:" not in text
+    assert "running agent on another model" in text and "re-issue unchanged" in text
     assert "Floor: at least critical" in context(project, "drop the users table")
     assert "Floor: at least complex" in context(project, "debug intermittent failure")
     critical = context(project, "drop the users table")
@@ -363,7 +381,7 @@ def test_decider_line_replaces_classify_line_only_when_usable(project, write_con
 
 def test_directive_research_only_when_configured(project):
     text = context(project, "add a button")
-    assert text.count("run the researcher agent per research= first") == 1
+    assert text.count("researcher agent per research= first") == 1
     assert "research=haiku/low" in next(line for line in text.splitlines() if line.startswith("standard:"))
     assert text.count("researcher") == 1 and "CODEX_SEARCH" not in text
     assert "research=" not in next(line for line in text.splitlines() if line.startswith("trivial:"))
