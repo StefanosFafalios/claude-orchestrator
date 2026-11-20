@@ -145,6 +145,17 @@ def test_enable_and_disable_engine_keep_other_keys(project, write_config):
 def test_enable_creates_config_and_never_clobbers_invalid_json(project, write_config):
     assert main(["enable", "openrouter"]) == 0
     assert json.loads((project / ".claude" / "orchestrator.config.json").read_text()) == {"engines": {"openrouter": True}}
-    path = write_config("{oops")
-    assert main(["disable", "openrouter"]) == 2
-    assert path.read_text() == "{oops"
+    for bad in ("{oops", '{"engines": "yes"}', "[]"):
+        path = write_config(bad)
+        assert main(["disable", "openrouter"]) == 2
+        assert path.read_text() == bad
+
+
+def test_enable_openrouter_reports_key_presence_only(project, monkeypatch, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
+    assert main(["enable", "openrouter"]) == 0
+    out = capsys.readouterr().out
+    assert "OPENROUTER_API_KEY is set" in out and "sk-or-secret" not in out
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    main(["enable", "openrouter"])
+    assert "NOT set" in capsys.readouterr().out

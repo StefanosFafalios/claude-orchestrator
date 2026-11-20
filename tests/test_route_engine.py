@@ -131,6 +131,10 @@ def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, 
     (Codex, or Claude at supercritical without OpenRouter), a human checks.
     """
     from route_engine import SIMILAR_POINTS
+    # Accepted gaps (owner rule: top models only in supercritical rows): no same-engine reviewer
+    # within reach, so a human checks. Any other gap is a template regression.
+    gaps = {("codex", "gpt-6.2-sol", "standard"), ("codex", "gpt-6.2-sol", "complex"),
+            ("claude", "opus", "supercritical")}
     monkeypatch.setenv("ORCHESTRATOR_DEFAULT_CONFIG", str(TEMPLATE))
     write_config({"engines": {"claude": only == "claude", "codex": only == "codex"}})
     config = load_config()
@@ -138,9 +142,7 @@ def test_shipped_review_rows_cover_every_implementer(write_config, monkeypatch, 
         if not engine_name(config, model, only):
             continue
         r = route("review", task_route, config, state(), implementation_model=model)
-        near = [m for m in row(config, "review", task_route)["models"] if m != model and engine_name(config, m, only)
-                and score(config, m) >= score(config, model) - SIMILAR_POINTS]
-        if not near:
+        if (only, model, task_route) in gaps:
             assert r["requires_human_review"] is True and r["canonical_model"] != model, (model, r)
             continue
         assert r["engine"] == only and r["canonical_model"] != model, (model, r)

@@ -188,12 +188,12 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
     if any("/ASK" in row for row in rows):
         lines.append(f"Supercritical task id {task_key}: before the first top-model step ask the user which effort (low|medium|high|xhigh|max; cost rises steeply), then run engine_state.py set-effort --task-id {task_key} --effort <e>. Route its sub-tasks with route_engine.py --task-id <sub> --parent-task-id {task_key} --permission-mode {permission_mode or 'default'}.")
     elif any(row.startswith("supercritical:") for row in rows):
-        lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>; route with it.")
+        lines.append(f"Supercritical {task_key}: user-named effort: engine_state.py set-effort --task-id {task_key} --effort <e>; route with that --task-id.")
     lines.extend(rows)
     if "research" in config["routing"]:
         extra = (" Codex: CODEX_SEARCH=1, read-only." if any("research=Codex" in row for row in rows) else "") + (
             " OpenRouter: research_run.py --query-file <f> --model <m>." if any("research=OpenRouter" in row for row in rows) else "")
-        lines.append("Needs outside facts (non-trivial): researcher agent per research= first, generic query only (no code/paths/names)." + extra)
+        lines.append("Needs outside facts (non-trivial): researcher agent per research= first; generic query (no code/paths/names)." + extra)
     if has_type_rows(config):
         type_lines = []
         for tier, (_, _, base_impl, base_steps) in zip(tiers[floor:], built):
@@ -210,9 +210,9 @@ def directive(prompt: str, config: dict, state: dict, session_id: str = "", perm
         if type_lines:
             lines.append("Types (only if clearly one): frontend, debug, refactor, tests, docs: state route=<tier>/<type>, use its <tier>/<type> line.")
             lines.extend(type_lines)
-    lines.append("Tier change mid-task: switch rows, hand over via a handoff; never downgrade critical. Multi-task plans: route each task with --task-id <task>.")
-    lines.append("Never move a routed step to a running agent on another model; re-issue a hook-refused Agent call unchanged.")
-    lines.append("Visibility: one line before each step on what starts and why. Run Codex in the background, await its notice. Relay approach and key decisions in <=3 bullets.")
+    lines.append("Tier change mid-task: switch rows, hand over via handoff; never downgrade critical. Multi-task plans: one --task-id per task.")
+    lines.append("Never hand a step to a running agent on another model. Agent refused: apply its fix; \"no verdict\": re-issue unchanged.")
+    lines.append("Visibility: one line per step on what starts and why. Codex: Bash run_in_background, await its notice, don't read output early. Relay approach and key decisions in <=3 bullets.")
     return "\n".join(lines)
 
 

@@ -52,7 +52,9 @@ not expired. Output is cheapest-first with `blended_usd_per_mtok = (3*prompt + c
   engine scoring at least as high, or within 3 points when the row holds nothing stronger
   (the shipped-template test in `tests/test_route_engine.py` checks this). Strong models
   appended at the end of a review row cost nothing until needed. Never add a top model to
-  get coverage: the router then takes a near-equal model or asks for human review.
+  get coverage. Accepted gaps (human review): GPT-6.2-sol on Codex alone below critical, and
+  Opus on Claude alone at supercritical; the test lists them, so a new gap must be added there
+  on purpose.
 - Never add a model below the quality bar just to give an engine work (no Codex-only tails):
   unavailable Codex names are skipped automatically.
 - `supercritical` rows hold only the top models, and top models (`fable`, `gpt-6.2-astra`) appear

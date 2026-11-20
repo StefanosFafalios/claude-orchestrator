@@ -98,6 +98,7 @@ def test_denies_models_the_claude_subscription_cannot_run(project):
     decision, reason = dispatch(project, "general-purpose", "add tests", model="fable")
     assert decision == "deny" and "OpenRouter" in reason
     assert dispatch(project, "cost-aware-orchestrator:verifier", "review", model="fable")[0] == "deny"
+    assert dispatch(project, "general-purpose", "x", model="anthropic/claude-fable-5.2")[0] == "deny"
     assert dispatch(project, "general-purpose", "add tests", model="opus")[0] == "allow"
     assert dispatch(project, "general-purpose", "add tests", model="inherit")[0] == "allow"
 
@@ -124,7 +125,7 @@ def test_directive_rows_rubric_and_floor(project, write_config):
     assert "inherits the tier of what it approves, never lower" in text
     assert text.count("Agents are cost-aware-orchestrator:<name>.") == 1
     assert "Floor:" not in text
-    assert "running agent on another model" in text
+    assert "running agent on another model" in text and "re-issue unchanged" in text
     assert "Floor: at least critical" in context(project, "drop the users table")
     assert "Floor: at least complex" in context(project, "debug intermittent failure")
     critical = context(project, "drop the users table")

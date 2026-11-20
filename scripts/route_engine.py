@@ -25,7 +25,7 @@ from engine_state import ENGINES, ConfigError, effective_status, engine_enabled,
 DEFAULT_BALANCED = ("standard", "complex")
 
 
-SIMILAR_POINTS = 3  # a reviewer this close counts as similar when the row has none stronger
+SIMILAR_POINTS = 3  # a reviewer this close to the implementer counts as similar
 
 
 class Engines:
@@ -185,18 +185,18 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
         impl_ids = {m for m in (_implementer(config, w) for w in writers if w) if m}
         others = [m for m in models if m not in impl_ids]
         bar = max((model_map.score(config, m) for m in impl_ids), default=None)
-        if bar is not None and all(model_map.score(config, m) < bar for m in others):
-            # The implementer tops its review row (Opus below supercritical: top models stay
-            # reserved for supercritical work), so a near-equal, different model reviews.
-            bar -= SIMILAR_POINTS
-        stronger = [m for m in others if model_map.score(config, m) >= bar] if bar is not None else others
-        result = _result(config, _select(engines, stronger, exclude=tuple(exclude)), entry["effort"], per_model)
-        if result["engine"] == "none" and stronger != others:
-            # Nothing at least as capable is available: a weaker, different model beats no review.
-            result = _result(config, _select(engines, others, exclude=tuple(exclude)), entry["effort"], per_model)
+        # Stronger first, then a near-equal (top models are kept for supercritical work, so Opus
+        # below it gets one), then a weaker, different model flagged for a human: beats no review.
+        tiers = [others] if bar is None else [
+            [m for m in others if model_map.score(config, m) >= bar],
+            [m for m in others if bar - SIMILAR_POINTS <= model_map.score(config, m) < bar], others]
+        for i, candidates in enumerate(tiers):
+            result = _result(config, _select(engines, candidates, exclude=tuple(exclude)), entry["effort"], per_model)
             if result["engine"] != "none":
-                result["requires_human_review"] = True
-                result["reason"] += "; no reviewer at least as capable as the implementer"
+                if i == 2:
+                    result["requires_human_review"] = True
+                    result["reason"] += "; no reviewer at least as capable as the implementer"
+                break
         return _need_human(result, human)
     result = _result(config, _select(engines, models, exclude=tuple(exclude)), entry["effort"], per_model)
     if role == "style_review":
