@@ -33,6 +33,7 @@ def test_one_call_returns_findings_and_cost(enabled, fake_openrouter, tmp_path, 
     sent = fake_openrouter.chat_requests[0]
     body = json.loads(sent["body"])
     assert body["model"] == "google/gemini-4-carbon" and body["reasoning"] == {"effort": "medium"}
+    assert body["max_tokens"] == review_run.MAX_TOKENS
     assert "cannot open files" in body["messages"][0]["content"]
     assert KEY not in sent["body"] and sent["headers"]["Authorization"] == f"Bearer {KEY}"
 

@@ -19,6 +19,7 @@ from engine_state import EFFORTS, ConfigError, load_config, load_synced_state, r
 from research_run import DEEP_TIMEOUT, Failure, chat, cost_line
 
 MAX_REQUEST_CHARS = 400_000  # about 100k tokens: one call stays cents, not dollars
+MAX_TOKENS = 16000
 INSTRUCTIONS = ("You are an independent code reviewer. Review only the diff and context in the request; you "
                 "cannot open files, so when a finding depends on unseen code, say what to check. Return "
                 "severity-ranked findings (blocker, high, medium, low), each with file:line, a category "
@@ -30,7 +31,10 @@ def review(request: str, model: str, effort: str | None, config: dict, state: di
     text = redact(request)
     if len(text) > MAX_REQUEST_CHARS:
         raise Failure(f"request is {len(text)} characters (limit {MAX_REQUEST_CHARS}): split the diff into smaller reviews")
-    body = {"model": model, "messages": [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": text}]}
+    # MAX_TOKENS bounds reasoning plus findings: an unbounded high-effort call ran past the timeout and
+    # billed with no answer.
+    body = {"model": model, "max_tokens": MAX_TOKENS,
+            "messages": [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": text}]}
     if effort:
         body["reasoning"] = {"effort": effort}
     answer = chat(body, config, state, DEEP_TIMEOUT)  # a long diff at high effort takes minutes
