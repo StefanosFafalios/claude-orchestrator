@@ -252,7 +252,7 @@ def test_claude_code_write_runs_bash_only_in_its_sandbox(tmp_path, claude_env, m
     args = (tmp_path / "claude-args").read_text()
     if openrouter_run.sandbox_available():
         assert "--tools=Read,Grep,Glob,Edit,Write,Bash --allowedTools=Bash --permission-mode=acceptEdits" in args
-        assert '"allowUnsandboxedCommands": false' in args
+        assert '"allowUnsandboxedCommands": false, "failIfUnavailable": true' in args
     monkeypatch.setattr(openrouter_run, "sandbox_available", lambda: False)
     cmd = openrouter_run.claude_command("anthropic/x", "", "workspace-write", "p")
     assert "--tools=Read,Grep,Glob,Edit,Write" in cmd and not any("Bash" in a for a in cmd)

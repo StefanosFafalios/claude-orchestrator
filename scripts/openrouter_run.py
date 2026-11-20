@@ -83,7 +83,8 @@ def build_command(config: dict, prompt: str) -> list:
     return cmd + [prompt]
 
 
-SANDBOX_SETTINGS = json.dumps({"sandbox": {"enabled": True, "allowUnsandboxedCommands": False}})
+# failIfUnavailable: a sandbox that cannot start must stop the run, never run the shell unconfined.
+SANDBOX_SETTINGS = json.dumps({"sandbox": {"enabled": True, "allowUnsandboxedCommands": False, "failIfUnavailable": True}})
 
 
 def sandbox_available() -> bool:
@@ -243,7 +244,7 @@ def finish(run: Path, key: str, budget: dict, job: dict) -> int:
         if IN_FLIGHT_RE.search(text) and not job.get("rerun"):
             time.sleep(poll_seconds())
             job["rerun"] = True
-            proc = start(run, job["command"], key, job["key_env"])
+            proc = start(run, job["command"], key, job.get("key_env") or "OPENROUTER_API_KEY")  # runs paused before key_env was stored
             job["pid"] = proc.pid
             return supervise(run, key, budget, job, lambda: proc.poll() is None)
         if IN_FLIGHT_RE.search(text) or code in (42, 43):  # 42 and 43 are reserved for this contract
