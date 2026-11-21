@@ -300,7 +300,11 @@ def main(argv: list) -> int:
                 job["approved_windows"] = job["approved_windows"] + [window]
             (run / "paused.json").unlink()
             guard(job)
-            os.killpg(job["pid"], signal.SIGCONT)
+            try:
+                os.killpg(job["pid"], signal.SIGCONT)
+            except (ProcessLookupError, PermissionError):  # died while paused (its pid may be reused); paused.json is gone
+                print(f"run {argv[1]} no longer exists", file=sys.stderr)
+                return 1
             return supervise(run, key, budget, job, lambda: pid_alive(job["pid"]))
         if len(argv) != 1 or not os.path.isfile(argv[0]):
             raise UsageError("usage: openrouter_run.py <task-file> | --resume RUN_ID | --stop RUN_ID")

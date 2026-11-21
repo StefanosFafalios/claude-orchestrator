@@ -14,6 +14,8 @@ fi
 
 limit_re='hit your (session|weekly) limit|usage limit|limit has been reached'
 weak_re='resets'
+# A successful reply is only a limit notice when it says so plainly; "resets" or "usage limit" alone is ordinary prose.
+success_limit_re="you('ve| have) hit your ([a-z0-9-]+ )?limit|(session|weekly|5-hour|usage) limit reached|limit has been reached"
 ordinary_re='unauthori[sz]ed|authenticat|not logged in|log ?in required|invalid api key|permission denied|forbidden|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network|could not resolve|timed out'
 
 out_file=$(mktemp)
@@ -35,7 +37,7 @@ is_limit() {
 
 if [[ $status -eq 0 ]]; then
   # A successful answer may legitimately discuss limits; only a short reply is a limit notice.
-  if [[ $(wc -c <"$out_file") -lt 400 ]] && is_limit "$(cat "$out_file" "$err_file")"; then
+  if [[ $(wc -c <"$out_file") -lt 400 ]] && grep -qiE "$success_limit_re" <<<"$(cat "$out_file" "$err_file")"; then
     echo "CLAUDE_USAGE_LIMIT"
     cat "$out_file" "$err_file" >&2
     exit 42

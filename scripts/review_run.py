@@ -28,7 +28,7 @@ INSTRUCTIONS = ("You are an independent code reviewer. Review only the diff and 
 
 
 def review(request: str, model: str, effort: str | None, config: dict, state: dict) -> str:
-    text = redact(request)
+    text = redact(request, values_only=True)
     if len(text) > MAX_REQUEST_CHARS:
         raise Failure(f"request is {len(text)} characters (limit {MAX_REQUEST_CHARS}): split the diff into smaller reviews")
     # MAX_TOKENS bounds reasoning plus findings: an unbounded high-effort call ran past the timeout and
