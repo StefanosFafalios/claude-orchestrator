@@ -77,8 +77,11 @@ OpenRouter caches are isolated with `ORCHESTRATOR_OPENROUTER_USAGE_FILE` and
 - `additionalContext` must be nested in `hookSpecificOutput`. The dispatch guard emits
   only `deny`; compliant dispatches produce no output so user permission rules apply.
 - Wrapper exit code 42 means usage limit and nothing else; 43 (OpenRouter runner only)
-  means paused awaiting the user's decision and never triggers a fallback. Auth, network,
-  permission and ordinary errors exit 1 and must never trigger a fallback.
+  means paused awaiting the user's decision and never triggers a fallback; 44 (Codex wrapper
+  only) means the engine is unavailable (logged out, or the model is not supported for the
+  account): the caller runs `engine_state.py mark-unavailable` and reroutes like 42, and the
+  `unavailable` status lasts until a successful run, `status --check-login` or a reset. Other
+  auth, network, permission and ordinary errors exit 1 and must never trigger a fallback.
 
 ## Coding standards
 

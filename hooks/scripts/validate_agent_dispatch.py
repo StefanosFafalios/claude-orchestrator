@@ -46,12 +46,13 @@ def violation(agent: str, prompt: str, config: dict, root: Path) -> str | None:
         return None
     state = load_state(root)
 
-    if agent == "implementer" and state["claude"].get("status") == "limited":
-        return "Claude is marked limited: write a handoff and route implementation to another engine instead."
+    blocked = ("limited", "unavailable")
+    if agent == "implementer" and state["claude"].get("status") in blocked:
+        return f"Claude is marked {state['claude']['status']}: write a handoff and route implementation to another engine instead."
     if agent == "codex-reviewer":
         engine = "openrouter" if "openrouter_run.py" in prompt or "review_run.py" in prompt else "codex"
-        if state[engine].get("status") == "limited":
-            return f"{LABELS[engine]} is marked limited: use the verifier agent for review instead."
+        if state[engine].get("status") in blocked:
+            return f"{LABELS[engine]} is marked {state[engine]['status']}: use the verifier agent for review instead."
     return None
 
 

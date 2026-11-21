@@ -22,8 +22,10 @@ def repo(project, monkeypatch, tmp_path_factory):
     subprocess.run(["git", "init", "-q"], cwd=project, check=True)
     bin_dir = tmp_path_factory.mktemp("bin")
     codex = bin_dir / "codex"
-    # Fake Codex: behaviour chosen by FAKE_CODEX=ok|limit; FAKE_SLEEP delays it.
+    # Fake Codex: behaviour chosen by FAKE_CODEX=ok|limit|unsupported; FAKE_SLEEP delays it.
     codex.write_text('#!/bin/sh\nif [ "$FAKE_CODEX" = limit ]; then echo "You have hit your usage limit" >&2; exit 1; fi\n'
+                     'if [ "$FAKE_CODEX" = unsupported ]; then echo "The \'gpt-x\' model is not supported when using Codex '
+                     'with a ChatGPT account." >&2; exit 1; fi\n'
                      'sleep "${FAKE_SLEEP:-0}"\necho "changed app.py" > app.py\necho "codex done"\n')
     codex.chmod(0o755)
     monkeypatch.setenv("CODEX_BIN", str(codex))
@@ -790,3 +792,30 @@ def test_main_review_on_openrouter_is_one_call(repo, write_config, monkeypatch, 
     review = {c["label"]: c for c in out["calls"]}["review:openrouter"]
     assert "review_run.py" in review["prompt"] and "openrouter_run.py" not in review["prompt"]
     assert "OPENROUTER_MODEL=" in review["prompt"] and "vendor/strong" in review["prompt"]
+
+
+def test_unsupported_codex_model_marks_it_unavailable_and_hands_off(repo, monkeypatch):
+    monkeypatch.setenv("FAKE_CODEX", "unsupported")
+    set_state(repo, claude="near_limit")
+    out = run(repo, {"task": "add unit tests for parser", "agents": {"implement:claude": DONE, "review:claude": NO_FINDINGS}})
+    result = out["result"]
+    event = result["fallback_events"][0]
+    assert (event["from"], event["to"], event["reason"]) == ("codex", "claude", "codex unavailable")
+    assert result["implementation_engine"] == "claude"
+    codex = state(repo)["codex"]
+    assert codex["status"] == "unavailable" and "(model_unsupported)" in codex["last_error"]
+    assert any(c["label"] == "mark-unavailable:codex" for c in out["calls"])
+
+
+def test_unavailable_codex_review_falls_back_and_is_marked(repo):
+    out = run(repo, {"task": "rotate production credentials", "agents": {
+        "scout": {"files": [], "impact": "x"},
+        "plan": {"assessment": "a", "steps": ["s"], "risks": [], "test_strategy": "t"},
+        "implement:claude": DONE,
+        "review:codex": {"exit_code": 44, "unavailable_cause": "logged_out", "findings": []},
+        "review:claude": NO_FINDINGS}})
+    result = out["result"]
+    assert result["review_engine"] == "claude"
+    assert result["fallback_events"][-1]["reason"] == "codex unavailable"
+    codex = state(repo)["codex"]
+    assert codex["status"] == "unavailable" and "(logged_out)" in codex["last_error"]

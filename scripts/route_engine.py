@@ -34,7 +34,8 @@ class Engines:
     def __init__(self, config: dict, state: dict):
         self.config = config
         self.state = state
-        self.enabled = {e: engine_enabled(config, e) for e in ENGINES}
+        # An unavailable engine (logged out, no supported model) routes like a disabled one.
+        self.enabled = {e: engine_enabled(config, e) and effective_status(state[e], config) != "unavailable" for e in ENGINES}
         self.status = {e: effective_status(state[e], config) for e in ENGINES if self.enabled[e]}
 
     def remaining(self, engine: str) -> float:
@@ -154,7 +155,7 @@ def _need_human(result: dict, human: bool) -> dict:
     return result
 
 
-def route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
+def _route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
           implementation_model: str | list | None = None, exclude: tuple = (), parent_task_id: str | None = None,
           permission_mode: str | None = None, headless: bool = False, task_type: str | None = None) -> dict:
     """``implementation_model`` is one model or every model that wrote code (a fix escalation adds
@@ -206,6 +207,20 @@ def route(role: str, task_route: str, config: dict, state: dict, task_key: str |
         if result["engine"] == "none" or engines.status[result["engine"]] != "healthy":
             return _none("both engines constrained; main review covers style", human=False)
     return _need_human(result, human)
+
+
+def route(role: str, task_route: str, config: dict, state: dict, task_key: str | None = None,
+          implementation_model: str | list | None = None, exclude: tuple = (), parent_task_id: str | None = None,
+          permission_mode: str | None = None, headless: bool = False, task_type: str | None = None) -> dict:
+    """Route a role; when an unavailable engine would have served the row, say so in the reason."""
+    result = _route(role, task_route, config, state, task_key, implementation_model, exclude, parent_task_id,
+                    permission_mode, headless, task_type)
+    if result["engine"] == "none":
+        return result
+    models = model_map.row(config, role, task_route, task_type)["models"]
+    gone = [e for e in ENGINES if engine_enabled(config, e) and effective_status(state[e], config) == "unavailable"
+            and any(model_map.engine_name(config, m, e) for m in models)]
+    return dict(result, reason=result["reason"] + "".join(f"; {e} is unavailable" for e in gone)) if gone else result
 
 
 def main(argv: list[str] | None = None) -> int:

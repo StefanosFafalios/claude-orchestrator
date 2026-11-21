@@ -37,7 +37,7 @@ CHANGE_REQUEST = re.compile(r"\b(?:add|implement|fix|change|create|update|refact
 
 POLICY = """ORCHESTRATION POLICY ACTIVE
 
-If an engine returns exit code 42, mark it limited and hand off only remaining work.
+If an engine returns exit code 42, mark it limited and hand off only remaining work; exit 44 (logged out or model unsupported): engine_state.py mark-unavailable, then the same.
 If both engines are constrained, avoid fan-out and require human approval."""
 
 DISABLED = "ORCHESTRATION POLICY DISABLED"

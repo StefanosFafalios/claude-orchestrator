@@ -425,6 +425,7 @@ then injects `ORCHESTRATION POLICY DISABLED`, and `/smart-task` still works):
 | Dispatch denied by `[cost-aware-orchestrator]` | Follow the reason, or add a `Justification:` line for a standard task that needs the architect |
 | Codex wrapper exits 1 with "not logged in" | Run `codex login`. This is not a quota failure, so there is no fallback |
 | OpenRouter never used | Needs `engines.openrouter: true` and a non-empty key variable in the shell that launched Claude Code (restart it after editing your profile) |
+| Codex exits 44 / shows `unavailable` | Logged out or the model is not supported for your account: run `codex login` (update the Codex CLI if sign-in fails), then `/cost-aware-orchestrator:engine-status` or `/cost-aware-orchestrator:reset-engine-state` |
 | Run exits 43 | Over a daily/weekly cap or the per-run allowance mid-run: `openrouter_run.py --resume RUN_ID` or `--stop RUN_ID` |
 | Hook seems silent | Check `claude --debug`. The hook prints JSON with `hookSpecificOutput.additionalContext` |
 

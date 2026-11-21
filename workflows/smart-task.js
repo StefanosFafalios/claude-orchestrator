@@ -150,6 +150,8 @@ const FINDINGS_SCHEMA = {
   required: ['findings'],
   properties: {
     exit_code: { type: 'number', description: 'codex wrapper exit code, when Codex was used' },
+    unavailable_cause: { type: 'string', enum: ['logged_out', 'model_unsupported'],
+      description: 'on exit 44: the cause from the wrapper line CODEX_UNAVAILABLE <cause>' },
     findings: {
       type: 'array',
       items: {
@@ -308,6 +310,18 @@ const WRAPPERS = {
   openrouter: (r, sandbox) => `OPENROUTER_SANDBOX=${sandbox} OPENROUTER_MODEL=${q(r.model)} OPENROUTER_EFFORT=${q(r.effort)} ${PY('openrouter_run.py')}`,
 }
 
+// Engines that exited 44 (logged out, model unsupported): they reroute like a usage limit (42), but
+// markLimit records them as unavailable, which no quota reset clears.
+// Maps engine -> cause (logged_out | model_unsupported) from the wrapper's CODEX_UNAVAILABLE line.
+const unavailableEngines = new Map()
+const unavailableCause = text => ((text || '').match(/CODEX_UNAVAILABLE (\w+)/) || [])[1] || 'unavailable'
+const limitReason = engine => `${engine} ${unavailableEngines.has(engine) ? 'unavailable' : 'usage limit'}`
+// An agent-relayed run (reviews) reports the wrapper's exit code: fold 44 into the 42 path the same way.
+function foldUnavailable(out, engine) {
+  if (out && out.exit_code === 44) { unavailableEngines.set(engine, out.unavailable_cause || 'unavailable'); out.exit_code = 42 }
+  return out
+}
+
 // Reviews: OpenRouter takes the request in one call (review_run.py); its agentic loop resends the
 // whole growing context on every tool call, which cost millions of tokens per review.
 const REVIEWERS = {
@@ -336,8 +350,9 @@ async function runWrapper(engine, r, file, sandbox, label, phaseName, prompt, en
   ].join('\n'), label, phaseName, 600000)
   const s = sections(res.stdout)
   const [run, window] = (s.PAUSED || '').split('\n')
+  if (res.exit_code === 44) unavailableEngines.set(engine, unavailableCause(s.OUTPUT))
   return {
-    code: res.exit_code, output: s.OUTPUT || res.stderr, answer: (s.ANSWER || '').trim(),
+    code: res.exit_code === 44 ? 42 : res.exit_code, output: s.OUTPUT || res.stderr, answer: (s.ANSWER || '').trim(),
     files: (s.FILES || '').split('\n').filter(f => f && !f.startsWith('.claude/')),
     paused: res.exit_code === 43 &&
       `OpenRouter paused over its ${window ? `${window} ` : ''}budget: run openrouter_run.py --resume ${run} or --stop ${run}.`,
@@ -440,7 +455,7 @@ async function scoutPass() {
     await markLimit(sr.engine, 'Scout')
     tried.push(sr.engine)
     const next = await routeRole('scout', tried, 'Scout')
-    fallbackEvents.push({ phase: 'scout', from: sr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${sr.engine} usage limit` })
+    fallbackEvents.push({ phase: 'scout', from: sr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${limitReason(sr.engine)}` })
     sr = next
   }
 }
@@ -492,7 +507,7 @@ async function researchPass(query) {
     await markLimit(rr.engine, 'Research')
     exclude.push(rr.engine)
     const next = await routeRole('research', exclude, 'Research')
-    fallbackEvents.push({ phase: 'research', from: rr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${rr.engine} usage limit` })
+    fallbackEvents.push({ phase: 'research', from: rr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${limitReason(rr.engine)}` })
     rr = next
   }
 }
@@ -537,7 +552,7 @@ async function runExternal(engine, tier, handoffPath) {
   const w = await runWrapper(engine, tier, handoffPath, 'workspace-write', `implement:${engine}`, 'Implement')
   if (w.paused) return { paused: true, limited: false, ok: false, summary: w.paused, files_changed: w.files, completed_work: '', remaining_work: TASK }
   if (w.code === 42) {
-    return { limited: true, ok: false, summary: `${name} usage limit`, files_changed: w.files,
+    return { limited: true, ok: false, summary: `${name} ${unavailableEngines.has(engine) ? 'unavailable' : 'usage limit'}`, files_changed: w.files,
       completed_work: `${name} stopped at its usage limit; any partial changes are in the current diff.`, remaining_work: TASK }
   }
   return {
@@ -551,7 +566,9 @@ const runEngine = (engine, tier, handoffPath) =>
   engine === 'claude' ? runClaude(tier, handoffPath) : runExternal(engine, tier, handoffPath)
 
 async function markLimit(engine, phaseName) {
-  await bash(`${PY('engine_state.py')} mark-limit --engine ${engine} --message ${q(`${engine} usage limit during ${TASK_ID}`)}`, `mark-limit:${engine}`, phaseName)
+  const mark = unavailableEngines.has(engine) ? 'mark-unavailable' : 'mark-limit'
+  const cause = unavailableEngines.has(engine) ? ` (${unavailableEngines.get(engine)})` : ''
+  await bash(`${PY('engine_state.py')} ${mark} --engine ${engine} --message ${q(`${limitReason(engine)}${cause} during ${TASK_ID}`)}`, `${mark}:${engine}`, phaseName)
 }
 
 // ---------------------------------------------------------------------------
@@ -593,7 +610,7 @@ while (true) {
   await markLimit(engine, 'Fallback')
   const next = await routeRole('implementation', [...tried], 'Fallback')
   if (next.engine === 'none') {
-    fallbackEvents.push({ phase: 'implementation', from: engine, to: null, reason: `${engine} usage limit; no fallback left` })
+    fallbackEvents.push({ phase: 'implementation', from: engine, to: null, reason: `${limitReason(engine)}; no fallback left` })
     requiresHumanReview = true
     result = out
     break
@@ -601,7 +618,7 @@ while (true) {
   const completed = out.completed_work || ''
   const remaining = out.remaining_work || TASK
   handoffPath = await writeHandoff(engine, next.engine, completed, remaining, out.files_changed.length ? out.files_changed : scoutFiles, 'Fallback')
-  fallbackEvents.push({ phase: 'implementation', from: engine, to: next.engine, handoff: handoffPath, reason: `${engine} usage limit` })
+  fallbackEvents.push({ phase: 'implementation', from: engine, to: next.engine, handoff: handoffPath, reason: `${limitReason(engine)}` })
   log(`fallback: ${engine} → ${next.engine} with ${handoffPath}`)
   requiresHumanReview ||= Boolean(next.requires_human_review)
   engine = next.engine
@@ -653,7 +670,7 @@ if (testCommand && result.ok !== false) {
     if (out.paused) return stop(out.summary, result.files_changed || [])
     if (out.limited) {
       await markLimit(a.engine, 'Fix')
-      fallbackEvents.push({ phase: 'fix', from: a.engine, to: null, reason: `${a.engine} usage limit during fix` })
+      fallbackEvents.push({ phase: 'fix', from: a.engine, to: null, reason: `${limitReason(a.engine)} during fix` })
       break
     }
     fixEvents.push({ engine: a.engine, model: a.tier.model, why: a.why })
@@ -715,12 +732,12 @@ function styleOn(r, lint) {
 async function runStyleReview() {
   if (!styleReview) return []
   const lint = await runLint()
-  let out = await styleOn(styleRoute, lint)
+  let out = foldUnavailable(await styleOn(styleRoute, lint), styleRoute.engine)
   if (out && out.exit_code === 42) {
     await markLimit(styleRoute.engine, 'Review')
     const next = await routeRole('style_review', [styleRoute.engine], 'Review')
     fallbackEvents.push({ phase: 'style_review', from: styleRoute.engine, to: next.engine === 'none' ? null : next.engine,
-      reason: `${styleRoute.engine} usage limit` })
+      reason: `${limitReason(styleRoute.engine)}` })
     if (next.engine === 'none') return []  // the router hands style to the main review
     out = await styleOn(next, lint)
   }
@@ -755,16 +772,17 @@ if (!result.ok && result.status !== 'partial') {
 } else if (review.engine !== 'none') {
   let out
   ;[out, styleFindings] = await Promise.all([reviewOn(review), runStyleReview()])
+  out = foldUnavailable(out, review.engine)
   if (out && out.exit_code === 42) {
     phase('Fallback')
     await markLimit(review.engine, 'Fallback')
     const next = await routeRole('review', [review.engine], 'Fallback', implFlags([...writers]))
     if (next.engine === 'none') {
-      fallbackEvents.push({ phase: 'review', from: review.engine, to: null, reason: `${review.engine} usage limit; no fallback left` })
+      fallbackEvents.push({ phase: 'review', from: review.engine, to: null, reason: `${limitReason(review.engine)}; no fallback left` })
       requiresHumanReview = true
       out = { findings: [] }
     } else {
-      fallbackEvents.push({ phase: 'review', from: review.engine, to: next.engine, reason: `${review.engine} usage limit` })
+      fallbackEvents.push({ phase: 'review', from: review.engine, to: next.engine, reason: `${limitReason(review.engine)}` })
       requiresHumanReview ||= Boolean(next.requires_human_review)
       reviewEngine = next.engine
       out = await reviewOn(next)
@@ -840,7 +858,7 @@ async function docsPass() {
     await markLimit(dr.engine, 'Docs')
     tried.push(dr.engine)
     const next = await routeRole('docs', tried, 'Docs')
-    fallbackEvents.push({ phase: 'docs', from: dr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${dr.engine} usage limit` })
+    fallbackEvents.push({ phase: 'docs', from: dr.engine, to: next.engine === 'none' ? null : next.engine, reason: `${limitReason(dr.engine)}` })
     dr = next
   }
 }

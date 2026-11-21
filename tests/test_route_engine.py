@@ -446,3 +446,11 @@ def test_opt_in_ask_row_keeps_ask_flow(config):
 
 def test_supercritical_architect_is_top_model(config):
     assert route("architecture", "supercritical", config, state(), "t1")["canonical_model"] == "fable"
+
+
+def test_unavailable_engine_routes_like_a_disabled_one(config):
+    st = state()
+    st["codex"]["status"] = "unavailable"
+    for role in ("implementation", "review", "scout"):
+        assert route(role, "complex", config, st, implementation_model="sonnet")["engine"] != "codex", role
+    assert "codex is unavailable" in route("review", "complex", config, st, implementation_model="sonnet")["reason"]

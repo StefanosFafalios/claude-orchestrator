@@ -166,3 +166,91 @@ def test_enable_keeps_the_config_file_mode(project, write_config):
     path.chmod(0o640)
     assert main(["enable", "openrouter"]) == 0
     assert path.stat().st_mode & 0o777 == 0o640
+
+
+def test_unavailable_lasts_until_success_or_reset(project, write_config):
+    write_config({})
+    main(["mark-unavailable", "--engine", "codex", "--message", "codex: model not supported"])
+    state = read_state(project)["codex"]
+    assert state["status"] == "unavailable" and state["last_error"] == "codex: model not supported"
+    main(["record-result", "--engine", "codex", "--task-id", "t1", "--status", "failed"])
+    assert read_state(project)["codex"]["status"] == "unavailable"
+    main(["record-result", "--engine", "codex", "--task-id", "t2", "--status", "success"])
+    assert read_state(project)["codex"]["status"] == "healthy"
+    main(["mark-unavailable", "--engine", "codex"])
+    main(["reset"])
+    assert read_state(project)["codex"]["status"] == "healthy"
+
+
+def test_observed_quota_never_clears_unavailable(project, write_config):
+    write_config({})
+    state = load_state()
+    state["codex"].update(status="unavailable", last_checked=None)
+    observations = {"codex": {"remaining_pct": 80.0, "observed_at": 2e9, "resets_at": None, "windows_reset": True, "source": "x"}}
+    assert engine_state.sync_usage(state, load_config(), observations) is False
+    assert state["codex"]["status"] == "unavailable"
+
+
+def fake_codex_login(tmp_path, monkeypatch, text, code):
+    fake = tmp_path / "codex"
+    fake.write_text(f"#!/bin/sh\necho '{text}'\nexit {code}\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CODEX_BIN", str(fake))
+
+
+def test_status_check_login_marks_and_clears(project, write_config, tmp_path, monkeypatch, capsys):
+    write_config({})
+    fake_codex_login(tmp_path, monkeypatch, "Not logged in", 1)
+    assert main(["status"]) == 0 and read_state_or_none(project) is None, "plain status never calls codex"
+    assert main(["status", "--check-login"]) == 0
+    assert read_state(project)["codex"]["status"] == "unavailable"
+    fake_codex_login(tmp_path, monkeypatch, "Logged in using ChatGPT", 0)
+    main(["status", "--check-login"])
+    assert read_state(project)["codex"]["status"] == "healthy"
+
+
+def read_state_or_none(project):
+    path = project / ".claude" / "engine-state.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+@pytest.mark.parametrize("message, cleared", [
+    ("codex unavailable (logged_out) during t1", True),
+    ("logged_out: Error: Not logged in", True),
+    ("codex unavailable (model_unsupported) during t1", False),
+])
+def test_login_check_lifts_only_logout_marks(project, write_config, tmp_path, monkeypatch, message, cleared):
+    write_config({})
+    main(["mark-unavailable", "--engine", "codex", "--message", message])
+    fake_codex_login(tmp_path, monkeypatch, "Logged in using ChatGPT", 0)
+    main(["status", "--check-login"])
+    assert (read_state(project)["codex"]["status"] == "healthy") is cleared
+
+
+def test_logout_check_keeps_a_limited_mark(project, write_config, tmp_path, monkeypatch):
+    write_config({})
+    main(["mark-limit", "--engine", "codex"])
+    fake_codex_login(tmp_path, monkeypatch, "Not logged in", 1)
+    main(["status", "--check-login"])
+    assert read_state(project)["codex"]["status"] == "limited"
+
+
+@pytest.mark.parametrize("installed, latest, warned", [
+    ("codex-cli 0.168.0", "0.171.0", True),
+    ("codex-cli 0.171.0", "0.171.0", False),
+    ("codex-cli 0.172.1", "0.171.0", False),
+    ("codex-cli 0.168.0", None, False),  # registry unreachable: no warning, no failure
+])
+def test_check_login_warns_about_an_old_codex_cli(project, write_config, tmp_path, monkeypatch, capsys,
+                                                    installed, latest, warned):
+    write_config({})
+    fake_codex_login(tmp_path, monkeypatch, installed, 0)
+    monkeypatch.setattr(engine_state, "latest_codex_version", lambda: latest)
+    assert main(["status", "--check-login"]) == 0
+    assert ("is older than the latest" in capsys.readouterr().err) is warned
+
+
+def test_plain_status_never_checks_the_version(project, write_config, monkeypatch):
+    write_config({})
+    monkeypatch.setattr(engine_state, "latest_codex_version", lambda: pytest.fail("network call in plain status"))
+    assert main(["status"]) == 0

@@ -79,6 +79,6 @@ ask before every change. Change only `.claude/`, instruction files (`CLAUDE.md`,
 7. **Git hygiene**: if the project is a git repository and `.gitignore` lacks them, offer
    to add `.claude/engine-state.json` and `.claude/orchestrator/`.
 
-8. Finish with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status` and a
+8. Finish with `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status --check-login` and a
    summary: which engines are ready, whether usage tracking is active for each, and
    which config values are still empty.
