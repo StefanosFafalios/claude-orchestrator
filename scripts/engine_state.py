@@ -10,6 +10,7 @@ from here so there is one implementation of each.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import json
 import os
@@ -18,9 +19,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows: no locking, same as before
+    fcntl = None
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PLUGIN_ROOT / "templates" / "orchestrator.config.json"
@@ -52,8 +59,24 @@ class ConfigError(Exception):
     """Raised when a configuration file cannot be used."""
 
 
-def redact(text: str) -> str:
-    """Replace credential-shaped substrings with a marker."""
+# Code-review text: keep ``if token != expected:`` readable; scrub only credential-looking values.
+VALUE_PATTERNS = SECRET_PATTERNS[1:] + [
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*"),  # JWT: its dotted form looks like code
+]
+# A keyword assigned a literal: quoted, or bare like a .env line. A closing quote on the key covers JSON/YAML;
+# a bare call, index or short dotted name (``make_token()``, ``request.form``) is code, not a secret.
+ASSIGNED_SECRET = re.compile(r"""(?i)(?<![A-Za-z0-9])((?:token|api[_-]?key|secret|password|passwd)(?:_\w*)?)\b(["']?\s*[:=]\s*)"""
+                             r"""(?:(["'])[^"'\n]{6,}\3|(?!(?:[A-Za-z_]\w{0,19}\.)+[A-Za-z_]\w{0,19}(?=\s|$|[,;]))"""
+                             r"""[^\s"'()\[\]{}]{6,}(?=\s|$|[,;]))""")
+
+
+def redact(text: str, values_only: bool = False) -> str:
+    """Replace credential-shaped substrings with a marker; ``values_only`` spares code that merely names a secret."""
+    if values_only:
+        for pattern in VALUE_PATTERNS:
+            text = pattern.sub("[REDACTED]", text)
+        return ASSIGNED_SECRET.sub(r"\1\2[REDACTED]", text)
     for pattern in SECRET_PATTERNS:
         text = pattern.sub("[REDACTED]", text)
     return text
@@ -217,11 +240,43 @@ def sync_usage(state: dict, config: dict, observations: dict | None = None) -> b
     return changed
 
 
+@contextlib.contextmanager
+def state_lock(root: Path | None = None, wait: float = 2.0):
+    """Exclusive lock around a read-change-write of the state file; never hold it across a subprocess or network call.
+
+    Best effort: the prompt hook must finish within 5 s and never fail, so an unwritable project or a
+    holder stuck longer than ``wait`` seconds (e.g. stopped with Ctrl-Z) means running unlocked, as before.
+    """
+    handle = None
+    if fcntl is not None:
+        path = state_path(root).parent / "orchestrator" / "engine-state.lock"  # setup git-ignores .claude/orchestrator/
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(path, "a")
+        except OSError:
+            handle = None
+    try:
+        deadline = time.monotonic() + wait
+        while handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:  # e.g. ENOLCK on NFS: run unlocked rather than fail the hook
+                if not isinstance(exc, BlockingIOError) or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.02)
+        yield
+    finally:
+        if handle:
+            handle.close()  # releases the lock
+
+
 def load_synced_state(config: dict, root: Path | None = None) -> dict:
     """State with fresh observed usage applied and saved."""
-    state = load_state(root)
-    if sync_usage(state, config):
-        save_state(state, root)
+    with state_lock(root):
+        state = load_state(root)
+        if sync_usage(state, config):
+            save_state(state, root)
     return state
 
 
@@ -415,11 +470,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config":
         print(json.dumps(config, indent=2))
         return 0
-    if args.command == "reset":
-        state = default_state()
-    elif args.command in ("status", "sync"):
+    if args.command in ("status", "sync"):
         state = load_synced_state(config)
         if getattr(args, "check_login", False):
+            # shortcut: the login check (a subprocess, up to 10 s) runs unlocked; a concurrent state write during this manual command can be lost.
             if check_codex_login(state, config):
                 save_state(state)
             warning = codex_version_warning(config)
@@ -427,8 +481,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(warning, file=sys.stderr)
         print(json.dumps(state, indent=2))
         return 0
-    else:
-        state = load_state()
+    with state_lock():
+        state = default_state() if args.command == "reset" else load_state()
         if args.command == "set":
             cmd_set(state, config, args)
         elif args.command == "mark-limit":
@@ -439,7 +493,6 @@ def main(argv: list[str] | None = None) -> int:
             cmd_record_result(state, args)
         elif args.command == "set-effort":
             state["supercritical_efforts"][args.task_id] = args.effort
-    if args.command != "status":
         save_state(state)
     print(json.dumps(state, indent=2))
     return 0

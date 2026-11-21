@@ -127,6 +127,15 @@ def test_resume_does_not_repause_same_window(project, tmp_path, env, fake_openro
     assert (code, out) == (0, "finished")
 
 
+def test_resume_of_a_dead_paused_run_is_a_clean_error(project, tmp_path, env, fake_openrouter):
+    run_id, pid = pause(project, tmp_path, env, fake_openrouter)
+    os.killpg(pid, signal.SIGKILL)
+    wait_for(lambda: state(pid) is None)
+    code, _, err = run(tmp_path, env, "--resume", run_id)
+    assert code == 1 and f"run {run_id} no longer exists" in err and "Traceback" not in err
+    assert not (project / ".claude" / "orchestrator" / "openrouter-runs" / run_id / "paused.json").exists()
+
+
 def test_stop_terminates_group(project, tmp_path, env, fake_openrouter):
     run_id, pid = pause(project, tmp_path, env, fake_openrouter)
     code, _, err = run(tmp_path, env, "--stop", run_id)

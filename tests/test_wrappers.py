@@ -131,3 +131,20 @@ def test_unavailable_phrases_in_the_transcript_are_ordinary_errors(tmp_path):
 def test_usage_limit_still_wins_over_unavailable_text(tmp_path):
     r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stderr="You've hit your usage limit (not logged in?)", code=1)
     assert r.returncode == 42
+
+
+@pytest.mark.parametrize("wrapper, env_var, marker", WRAPPERS)
+@pytest.mark.parametrize("answer", ["Done: the counter now resets daily.", "Added a usage limit check.",
+                                    "Done: returns 429 when clients hit your API limit.", "Handled the insufficient_quota error."])
+def test_short_success_mentioning_limits_is_success(tmp_path, wrapper, env_var, marker, answer):
+    r = run(wrapper, tmp_path, env_var, stdout=answer)
+    assert r.returncode == 0 and answer in r.stdout and marker not in r.stdout
+
+
+@pytest.mark.parametrize("wrapper, env_var, marker", WRAPPERS)
+@pytest.mark.parametrize("notice", ["5-hour limit reached \u2219 resets 1am", "Session limit reached \u2219 resets 3pm",
+                                    "Weekly limit reached \u2219 resets Oct 9", "Opus weekly limit reached",
+                                    "You've hit your limit \u00b7 resets 3pm", "You've hit your usage limit."])
+def test_short_success_that_is_a_limit_notice_exits_42(tmp_path, wrapper, env_var, marker, notice):
+    r = run(wrapper, tmp_path, env_var, stdout=notice)
+    assert r.returncode == 42 and marker in r.stdout

@@ -16,6 +16,8 @@ fi
 
 limit_re='usage limit|limit reached|rate limit exceeded|quota exceeded|insufficient_quota'
 weak_re='upgrade|resets'
+# A successful reply is only a limit notice when it says so plainly; "resets" or "usage limit" alone is ordinary prose.
+success_limit_re="you('ve| have) hit your ([a-z0-9-]+ )?limit|(session|weekly|5-hour|usage) limit reached|limit has been reached"
 ordinary_re='unauthori[sz]ed|authenticat|not logged in|log ?in required|invalid api key|permission denied|forbidden|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network|could not resolve|timed out'
 logged_out_re='not logged in|log ?in required'
 unsupported_re='model is not supported|not supported when using codex'
@@ -43,7 +45,7 @@ is_limit() {
 
 if [[ $status -eq 0 ]]; then
   # Codex writes progress to stderr; on success only a short stdout can be a limit notice.
-  if [[ $(wc -c <"$out_file") -lt 400 ]] && is_limit "$(cat "$out_file")"; then
+  if [[ $(wc -c <"$out_file") -lt 400 ]] && grep -qiE "$success_limit_re" <<<"$(cat "$out_file")"; then
     echo "CODEX_USAGE_LIMIT"
     cat "$out_file" "$err_file" >&2
     exit 42

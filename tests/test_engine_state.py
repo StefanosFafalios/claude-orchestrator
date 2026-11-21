@@ -1,10 +1,12 @@
 import json
 import os
+import threading
+import time
 
 import pytest
 
 import engine_state
-from engine_state import ConfigError, load_config, load_state, main, save_state, state_path
+from engine_state import ConfigError, load_config, load_state, main, redact, save_state, state_lock, state_path
 
 
 def read_state(project):
@@ -36,7 +38,7 @@ def test_failed_write_keeps_previous_state(project, monkeypatch):
     with pytest.raises(OSError):
         main(["mark-limit", "--engine", "claude"])
     assert (project / ".claude" / "engine-state.json").read_text() == before
-    assert os.listdir(project / ".claude") == ["engine-state.json"]
+    assert sorted(os.listdir(project / ".claude")) == ["engine-state.json", "orchestrator"]
 
 
 def test_mark_limit_persists_error_and_timestamp(project):
@@ -254,3 +256,43 @@ def test_plain_status_never_checks_the_version(project, write_config, monkeypatc
     write_config({})
     monkeypatch.setattr(engine_state, "latest_codex_version", lambda: pytest.fail("network call in plain status"))
     assert main(["status"]) == 0
+
+
+def test_values_only_redact_keeps_code_shape():
+    assert redact("if token != expected:", values_only=True) == "if token != expected:"
+    for text in ('api_key = "sk-or-v1-0123456789abcdefsecret"', 'password = "hunter22secret"',
+                 "Authorization: Bearer abcdefghijklmnop1234", '"api_key": "hunter22secret"', "PASSWORD=hunter22secret"):
+        out = redact(text, values_only=True)
+        assert "[REDACTED]" in out and "hunter22" not in out and "0123456789" not in out and "abcdefghijklmnop" not in out
+    assert redact('password = "hunter22secret"', values_only=True).startswith("password = ")
+    for leak in ("password=P@ssw0rd123", "api_key=c2VjcmV0c2VjcmV0==", "token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIx.abc",
+                 "password: hunter2!", "password: hunter2", "DB_PASSWORD=hunter22secret",
+                 "AWS_SECRET_ACCESS_KEY=hunter22secret", 'client_secret: "correct horse battery"'):
+        assert "[REDACTED]" in redact(leak, values_only=True), leak
+    assert redact("AWS_SECRET_ACCESS_KEY=hunter22secret", values_only=True) == "AWS_SECRET_ACCESS_KEY=[REDACTED]"
+    for code in ("token = make_token()", "password = request.form", "token = self.token",
+                 "secret_key = settings.SECRET_KEY", "token: Optional[str] = None", "if token == expected:"):
+        assert redact(code, values_only=True) == code
+    assert "abc" not in redact("token: abc")
+
+
+def test_state_lock_serialises_concurrent_writers(project):
+    thread = threading.Thread(target=main, args=(["mark-limit", "--engine", "codex"],))
+    with state_lock(project):
+        thread.start()
+        time.sleep(0.2)
+        assert thread.is_alive()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert read_state(project)["codex"]["status"] == "limited"
+
+
+def test_state_lock_never_blocks_the_hook(project, monkeypatch):
+    with state_lock(project):  # a stuck holder: the second taker gives up and runs unlocked
+        start = time.monotonic()
+        with state_lock(project, wait=0.1):
+            pass
+        assert time.monotonic() - start < 1
+    monkeypatch.setattr(engine_state.Path, "mkdir", lambda *a, **k: (_ for _ in ()).throw(PermissionError("read-only")))
+    with state_lock(project):  # an unwritable project runs unlocked instead of failing
+        pass
