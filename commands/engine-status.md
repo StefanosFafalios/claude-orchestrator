@@ -5,7 +5,7 @@ allowed-tools: Bash
 
 Run:
 
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/engine_state.py" status --check-login
 
 and, for the current routing decisions:
 

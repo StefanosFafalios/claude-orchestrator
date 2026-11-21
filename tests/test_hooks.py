@@ -439,3 +439,10 @@ def test_every_agent_reports_tersely():
     for path in sorted((Path(__file__).parent.parent / "agents").glob("*.md")):
         text = path.read_text()
         assert text.count("## Reporting") == 1 and "STATUS: done | partial | blocked | failed" in text, path.name
+
+
+def test_unavailable_engines_block_matching_agents(project):
+    state = project / ".claude" / "engine-state.json"
+    state.write_text(json.dumps({"codex": {"status": "unavailable"}}))
+    decision, reason = dispatch(project, "cost-aware-orchestrator:codex-reviewer", "review diff")
+    assert decision == "deny" and "unavailable" in reason

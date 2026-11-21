@@ -247,7 +247,7 @@ def finish(run: Path, key: str, budget: dict, job: dict) -> int:
             proc = start(run, job["command"], key, job.get("key_env") or "OPENROUTER_API_KEY")  # runs paused before key_env was stored
             job["pid"] = proc.pid
             return supervise(run, key, budget, job, lambda: proc.poll() is None)
-        if IN_FLIGHT_RE.search(text) or code in (42, 43):  # 42 and 43 are reserved for this contract
+        if IN_FLIGHT_RE.search(text) or code in (42, 43, 44):  # reserved for the wrapper contracts
             code = 1
     if "--bare" in job["command"]:
         out = redact(out)  # its tools can read .env files: never persist or relay a key it echoes

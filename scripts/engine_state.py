@@ -14,8 +14,11 @@ import copy
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +27,8 @@ DEFAULT_CONFIG_PATH = PLUGIN_ROOT / "templates" / "orchestrator.config.json"
 ENGINES = ("claude", "codex", "openrouter")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-STATUSES = ("healthy", "near_limit", "limited")
+STATUSES = ("healthy", "near_limit", "limited", "unavailable")
+LOGGED_OUT_RE = re.compile(r"not logged in|log ?in required|logged_out", re.I)
 MAX_ERROR_CHARS = 500
 
 DEFAULT_ENGINE = {
@@ -186,6 +190,8 @@ def sync_usage(state: dict, config: dict, observations: dict | None = None) -> b
         entry = state[engine]
         last = _epoch(entry.get("last_checked"))
         fresh = last is None or obs["observed_at"] >= last
+        if entry.get("status") == "unavailable":  # quota data says nothing about login or model support
+            continue
         if not (fresh or (entry.get("status") == "limited" and obs["windows_reset"])):
             continue
         remaining = obs["remaining_pct"]
@@ -220,9 +226,9 @@ def load_synced_state(config: dict, root: Path | None = None) -> dict:
 
 
 def effective_status(entry: dict, config: dict) -> str:
-    """``limited`` wins; otherwise a remaining percentage below the threshold is ``near_limit``."""
-    if entry.get("status") == "limited":
-        return "limited"
+    """``unavailable`` and ``limited`` win; otherwise a remaining percentage below the threshold is ``near_limit``."""
+    if entry.get("status") in ("unavailable", "limited"):
+        return entry["status"]
     if entry.get("status") == "near_limit":
         return "near_limit"
     if float(entry.get("remaining_pct", 100)) < config["thresholds"]["near_limit_pct"]:
@@ -251,6 +257,66 @@ def cmd_mark_limit(state: dict, args: argparse.Namespace) -> None:
     )
 
 
+def cmd_mark_unavailable(state: dict, args: argparse.Namespace) -> None:
+    """Logged out or no supported model: not a quota limit, so it lasts until a successful run or a reset."""
+    state[args.engine].update(status="unavailable", last_error=redact(args.message)[:MAX_ERROR_CHARS],
+                              last_checked=now_iso())
+
+
+def check_codex_login(state: dict, config: dict) -> bool:
+    """Mark Codex unavailable when ``codex login status`` says logged out, and lift a login-caused mark
+    when it says logged in. Commands only: hooks must never call codex. Returns whether state changed."""
+    codex = os.environ.get("CODEX_BIN") or "codex"
+    if not engine_enabled(config, "codex") or not shutil.which(codex):
+        return False
+    try:
+        result = subprocess.run([codex, "login", "status"], capture_output=True, text=True, timeout=10,
+                                stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    entry = state["codex"]
+    if LOGGED_OUT_RE.search(result.stdout + result.stderr):
+        if entry.get("status") in ("unavailable", "limited"):  # limited already routes away; keep its reset time
+            return False
+        entry.update(status="unavailable", last_error="codex: not logged in (run codex login)", last_checked=now_iso())
+        return True
+    if result.returncode == 0 and entry.get("status") == "unavailable" and LOGGED_OUT_RE.search(entry.get("last_error") or ""):
+        entry.update(status="healthy", last_error=None, last_checked=now_iso())
+        return True
+    return False
+
+
+def _version(text: str) -> tuple | None:
+    found = re.search(r"(\d+)\.(\d+)\.(\d+)", text or "")
+    return tuple(int(part) for part in found.groups()) if found else None
+
+
+def latest_codex_version() -> str | None:
+    """Latest published Codex CLI version from the public npm registry; None when unreachable."""
+    try:
+        with urllib.request.urlopen("https://registry.npmjs.org/@openai/codex/latest", timeout=5) as response:
+            return json.loads(response.read().decode("utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def codex_version_warning(config: dict) -> str | None:
+    """Warn when the installed Codex CLI is older than the latest release (an old CLI can fail to sign in)."""
+    codex = os.environ.get("CODEX_BIN") or "codex"
+    if not engine_enabled(config, "codex") or not shutil.which(codex):
+        return None
+    try:
+        installed = subprocess.run([codex, "--version"], capture_output=True, text=True, timeout=10,
+                                   stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    latest = latest_codex_version()
+    if _version(installed) and _version(latest) and _version(installed) < _version(latest):
+        return (f"warning: Codex CLI {'.'.join(map(str, _version(installed)))} is older than the latest {latest}; "
+                "update with: npm install -g @openai/codex@latest")
+    return None
+
+
 def cmd_record_result(state: dict, args: argparse.Namespace) -> None:
     entry = state[args.engine]
     entry["last_result"] = {"task_id": args.task_id, "status": args.status, "at": now_iso()}
@@ -258,6 +324,8 @@ def cmd_record_result(state: dict, args: argparse.Namespace) -> None:
     if args.status == "success" and entry.get("status") == "limited":
         # A successful run proves the quota has reset.
         entry.update(status="healthy", remaining_pct=100, last_error=None)
+    elif args.status == "success" and entry.get("status") == "unavailable":
+        entry.update(status="healthy", last_error=None)  # it runs again: logged in, model supported
 
 
 def set_engine_enabled(engine: str, enabled: bool, root: Path | None = None) -> Path:
@@ -286,7 +354,10 @@ def set_engine_enabled(engine: str, enabled: bool, root: Path | None = None) -> 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("status", help="sync observed usage, then print current state as JSON")
+    status_p = sub.add_parser("status", help="sync observed usage, then print current state as JSON")
+    status_p.add_argument("--check-login", action="store_true",
+                          help="also run `codex login status` and compare the Codex CLI with the latest release "
+                               "(slow, uses the network; for the status and setup commands only)")
     sub.add_parser("sync", help="apply observed Claude/Codex usage from local files")
     sub.add_parser("config", help="print the merged configuration as JSON")
     sub.add_parser("reset", help="restore default state")
@@ -299,6 +370,10 @@ def build_parser() -> argparse.ArgumentParser:
     limit_p = sub.add_parser("mark-limit", help="mark an engine as having hit its usage limit")
     limit_p.add_argument("--engine", choices=ENGINES, required=True)
     limit_p.add_argument("--message", default="usage limit reported")
+
+    unavailable_p = sub.add_parser("mark-unavailable", help="mark an engine unavailable (logged out, model unsupported)")
+    unavailable_p.add_argument("--engine", choices=ENGINES, required=True)
+    unavailable_p.add_argument("--message", default="engine unavailable")
 
     result_p = sub.add_parser("record-result", help="record a task outcome for an engine")
     result_p.add_argument("--engine", choices=ENGINES, required=True)
@@ -343,7 +418,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "reset":
         state = default_state()
     elif args.command in ("status", "sync"):
-        print(json.dumps(load_synced_state(config), indent=2))
+        state = load_synced_state(config)
+        if getattr(args, "check_login", False):
+            if check_codex_login(state, config):
+                save_state(state)
+            warning = codex_version_warning(config)
+            if warning:
+                print(warning, file=sys.stderr)
+        print(json.dumps(state, indent=2))
         return 0
     else:
         state = load_state()
@@ -351,6 +433,8 @@ def main(argv: list[str] | None = None) -> int:
             cmd_set(state, config, args)
         elif args.command == "mark-limit":
             cmd_mark_limit(state, args)
+        elif args.command == "mark-unavailable":
+            cmd_mark_unavailable(state, args)
         elif args.command == "record-result":
             cmd_record_result(state, args)
         elif args.command == "set-effort":

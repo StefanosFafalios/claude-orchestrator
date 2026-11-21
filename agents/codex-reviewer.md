@@ -36,7 +36,10 @@ Steps:
 4. Exit 43 (`openrouter_run.py` only: run paused over budget, stdout `OPENROUTER_PAUSED <run-id>`): report the
    pause, the run id and the `openrouter_run.py --resume <run-id>` / `--stop <run-id>`
    commands, with exit code 43. Do not retry and do not resume or stop it yourself.
-5. Any other non-zero exit is an ordinary error: report it; do not mark a limit.
+5. Exit 44 (Codex logged out or model unsupported, stdout `CODEX_UNAVAILABLE <cause>`): run
+   `python3 "<scripts>/engine_state.py" mark-unavailable --engine codex --message "<cause>: <last error line>"`
+   and report exit code 44 with `unavailable_cause` set to that cause. Do not retry.
+6. Any other non-zero exit is an ordinary error: report it; do not mark a limit.
 Always report the exit code.
 
 Ask the reviewer to return severity-ranked findings only (blocker, high, medium, low).

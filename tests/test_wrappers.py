@@ -108,3 +108,26 @@ def test_codex_last_message_flag(tmp_path, monkeypatch, value, expected):
     assert ("-o" in words) is expected
     if expected:
         assert words[words.index("-o") + 1] == value and words.index("exec") < words.index("-o")
+
+
+@pytest.mark.parametrize("message", [
+    "The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
+    "Error: Not logged in. Run codex login.",
+])
+def test_codex_unavailable_exits_44(tmp_path, message):
+    # Not a quota limit: the caller marks Codex unavailable and reroutes; no reset clears it.
+    r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stderr=message, code=1)
+    cause = "logged_out" if "logged in" in message else "model_unsupported"
+    assert r.returncode == 44 and r.stdout.strip() == f"CODEX_UNAVAILABLE {cause}" and message in r.stderr
+
+
+def test_unavailable_phrases_in_the_transcript_are_ordinary_errors(tmp_path):
+    # The prompt echo and transcript precede the error; code under review may mention these phrases.
+    transcript = "prompt: handle 'Not logged in' and 'model is not supported' messages\n" + "work\n" * 10
+    r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stderr=transcript + "ERROR: request timed out", code=1)
+    assert r.returncode == 1
+
+
+def test_usage_limit_still_wins_over_unavailable_text(tmp_path):
+    r = run("codex_with_fallback.sh", tmp_path, "CODEX_BIN", stderr="You've hit your usage limit (not logged in?)", code=1)
+    assert r.returncode == 42
