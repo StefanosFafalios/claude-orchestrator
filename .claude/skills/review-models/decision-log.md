@@ -106,3 +106,28 @@ test checks tool calling, not care at low effort. Spend: $1.19 (owner-reported; 
 lags), about 314k tokens. Owner: never smoke-test `fable` again; test only new or changed slugs.
 Codex names `gpt-6.1-terra`, `gpt-6.2-sol` and `gpt-6.2-astra` are not yet in this
 machine's Codex model cache; `engine_name` skips them until they appear.
+
+## 2026-11-22: review, no change
+
+Checked every catalog model added since 2026-10-25 against the map. None replaces a mapped model.
+
+| model | AA Intelligence Index | ~composite | blended $/Mtok | verdict |
+|---|---|---|---|---|
+| Gemini 4 Neon | 61 | 94 (1 source) | 6.00 | not added: Gemini 4 Carbon (93) costs 4.00 and already covers Opus within 3 points |
+| Qwen4 Max | 43 | 67 | 2.14 | not added: GPT-6.1 Terra (83) costs 2.00 |
+| Hy4 | 35 | 54 | 0.63 | not added: below Haiku (58, 0.20) |
+| Inkling 2 Small | 31 | 48 | 0.47 | not added: below Haiku |
+| Inkling 2 Mini | 20 | 31 | 0.13 | not added: below GPT-6 Luna (36); JSON reliability for the decider unknown |
+| GPT-6.2 Sol Pro, GPT-6.2 Astra Pro | – | – | 4.00, 16.00 | no published scores; same price as Sol and Astra, re-check when scored |
+| Hy4 Flash, Nex N2.6, DaisyRose 27B | – | – | 0.06-0.58 | no published scores |
+
+Mapped models' AA Intelligence scores are unchanged (Sonnet 5.5 now 55). Terminal-Bench 2.1 figures
+from the two mirrors disagree widely (Hy4: 85.4 vs 55.1) and were not used. The AA Coding Agent
+Index page could not be read (JS-rendered). Perplexity `sonar*` slugs are absent from `catalog.py`
+output only because they list no tool calling; `research_run.py` calls them directly.
+
+**Evidence** (retrieved 2026-11-22): https://artificialanalysis.ai/leaderboards/models;
+https://benchlm.ai/benchmarks/terminalBench2 (snapshot 2026-11-20, not used); prices and slugs from
+`GET https://openrouter.ai/api/v1/models` through `catalog.py` (278 models kept).
+
+**Spend:** none (no smoke tests; nothing changed).
